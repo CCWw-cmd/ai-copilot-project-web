@@ -341,6 +341,7 @@ async function uploadSelectedFile() {
 
   const formData = new FormData()
   formData.append('file', file)
+  formData.append('fileName',selectedFileName.value)
   formData.append('taskId', currentUploadTaskId)
 
   try {
