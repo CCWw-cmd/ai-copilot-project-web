@@ -1,19 +1,24 @@
 <script setup lang="ts">
 import axios from 'axios'
-import { computed, onBeforeUnmount, ref, watch, watchEffect } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 
 import { API_BASE_URL } from './lib/http'
+import MindMap from './components/MindMap.vue'
 
 const query = ref('')
+const isChatStarted = ref(false)
 const output = ref('')
 const status = ref('状态：待机')
 const selectedFileName = ref('未选择文件')
+const uploadedFiles = ref<{ name: string; status: 'uploading' | 'success' }[]>([])
 const isUploading = ref(false)
 const isConnecting = ref(false)
 const isStreaming = ref(false)
 const hasReceivedChunk = ref(false)
+const isReading = ref(false)
+const isMuted = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const audioRef = ref<HTMLAudioElement | null>(null)
 
@@ -35,8 +40,18 @@ const isLoading = computed(
 const canSend = computed(
   () => !isUploading.value && !isStreaming.value && query.value.trim().length > 0,
 )
+
+const mindmapCode = computed(() => {
+  const match = output.value.match(/```mindmap\n([\s\S]*?)\n```/)
+  return match ? match[1] : ''
+})
+
+const cleanOutput = computed(() => {
+  return output.value.replace(/```mindmap\n[\s\S]*?\n```/g, '').trim()
+})
+
 const renderedOutput = computed(() =>
-  DOMPurify.sanitize(marked.parse(output.value, { breaks: true }) as string),
+  DOMPurify.sanitize(marked.parse(cleanOutput.value, { breaks: true }) as string),
 )
 
 interface UploadProgressPayload {
@@ -115,17 +130,29 @@ function renderUploadProgress(progress: UploadProgressPayload) {
     typeof progress.progress === 'number' ? ` ${progress.progress}%` : ''
   let message = progress.message ?? '后台处理中'
 
+  // Skip the initial "waiting" message to avoid status flicker
+  if (message === '等待上传开始') {
+    return
+  }
+
   if (message === '上传完成' || progress.status === 'completed') {
     message = '文件已上传'
   }
 
   status.value = `状态：${message}${percent}`
-  setJsonOutput(progress)
 
   if (progress.status === 'completed' || progress.status === 'failed') {
     isUploading.value = false
     currentUploadTaskId = null
     closeRagProgressEventSource()
+
+    // Clear status and output after 1 second on completion
+    if (progress.status === 'completed') {
+      setTimeout(() => {
+        status.value = '状态：待机'
+        output.value = ''
+      }, 1000)
+    }
   }
 }
 
@@ -142,11 +169,20 @@ function openUploadProgressStream(taskId: string) {
       renderUploadProgress(progress)
     } catch {
       let message = event.data
+      if (message === '等待上传开始') {
+        return
+      }
       if (message === '上传完成') {
         message = '文件已上传'
+        
+        // Handle completion in catch block for plain text messages
+        setTimeout(() => {
+          status.value = '状态：待机'
+          output.value = ''
+          isUploading.value = false
+        }, 1000)
       }
       status.value = `状态：${message}`
-      output.value = `\`\`\`\n${event.data}\n\`\`\``
     }
   }
 
@@ -158,6 +194,7 @@ function openUploadProgressStream(taskId: string) {
 }
 
 function resetTtsPlayer() {
+  isReading.value = false
   ttsPendingBuffers = []
   ttsStreamFinal = false
   ttsSourceBuffer = null
@@ -336,8 +373,15 @@ async function uploadSelectedFile() {
   isUploading.value = true
   status.value = '状态：文件上传中...'
   currentUploadTaskId = createUploadTaskId()
-  output.value = `正在上传文件：${file.name}`
   openUploadProgressStream(currentUploadTaskId)
+
+  // Add to sidebar list with uploading status
+  const existingFileIndex = uploadedFiles.value.findIndex(f => f.name === file.name)
+  if (existingFileIndex > -1) {
+    uploadedFiles.value[existingFileIndex].status = 'uploading'
+  } else {
+    uploadedFiles.value.push({ name: file.name, status: 'uploading' })
+  }
 
   const formData = new FormData()
   formData.append('file', file)
@@ -362,14 +406,6 @@ async function uploadSelectedFile() {
         )
 
         status.value = `状态：文件上传中 ${percent}%`
-        setJsonOutput({
-          taskId: currentUploadTaskId,
-          stage: 'uploading',
-          status: 'processing',
-          progress: percent,
-          message: `文件上传中 ${percent}%`,
-          fileName: file.name,
-        })
       }
 
       xhr.onerror = () => {
@@ -400,17 +436,34 @@ async function uploadSelectedFile() {
       xhr.send(formData)
     })
 
+    // Clear selected file UI immediately after successful upload initiation/completion
+    selectedFileName.value = '未选择文件'
+    if (fileInput.value) fileInput.value.value = ''
+
     if (typeof result === 'string') {
-      output.value = result
       const displayMsg = result === '上传完成' ? '文件已上传' : result
       status.value = `状态：${displayMsg}`
+
+      // Clear status after 1 second if it was successful
+      setTimeout(() => {
+        status.value = '状态：待机'
+      }, 1000)
+
+      if (result === '上传完成' || result.includes('完成')) {
+        const fileObj = uploadedFiles.value.find(f => f.name === file.name)
+        if (fileObj) fileObj.status = 'success'
+      }
       isUploading.value = false
     } else {
       status.value = '状态：文件已上传，后台处理中...'
-      setJsonOutput({
-        ...((result as Record<string, unknown>) ?? {}),
-        note: '文件上传完成，等待服务端处理进度推送',
-      })
+      
+      // Clear status after 1 second
+      setTimeout(() => {
+        status.value = '状态：待机'
+      }, 1000)
+
+      const fileObj = uploadedFiles.value.find(f => f.name === file.name)
+      if (fileObj) fileObj.status = 'success'
     }
   } catch (error) {
     status.value = '状态：文件上传失败'
@@ -434,6 +487,7 @@ async function startChat() {
 
   closeEventSource()
   resetTtsPlayer()
+  isChatStarted.value = true
   output.value = ''
   status.value = '状态：连接中...'
   isConnecting.value = true
@@ -474,11 +528,26 @@ async function startChat() {
   }
 }
 
+watchEffect(() => {
+  if (audioRef.value) {
+    audioRef.value.muted = isMuted.value
+  }
+})
+
 watch(()=>selectedFileName.value, (newVal) => {
   if (newVal==='未选择文件') {
     status.value = `状态：待机`
     output.value = ''
     isUploading.value = false
+  }
+})
+
+onMounted(() => {
+  if (audioRef.value) {
+    audioRef.value.onplaying = () => { isReading.value = true }
+    audioRef.value.onpause = () => { isReading.value = false }
+    audioRef.value.onended = () => { isReading.value = false }
+    audioRef.value.onerror = () => { isReading.value = false }
   }
 })
 
@@ -492,8 +561,9 @@ onBeforeUnmount(() => {
 
 <template>
   <div
-    class="relative min-h-screen overflow-hidden bg-[#05010d] text-white antialiased"
+    class="relative flex h-screen flex-col overflow-hidden bg-[#05010d] text-white antialiased"
   >
+    <!-- Background elements omitted for brevity, but they should stay -->
     <div class="pointer-events-none absolute inset-0">
       <div
         class="absolute left-1/2 top-[-9rem] h-[24rem] w-[24rem] -translate-x-1/2 rounded-full bg-nebula-500/25 blur-[120px]"
@@ -508,128 +578,215 @@ onBeforeUnmount(() => {
       <div class="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.04)_1px,transparent_1px)] bg-[size:72px_72px] opacity-10" />
     </div>
 
-    <main class="relative mx-auto flex min-h-screen max-w-5xl items-center px-4 md:px-6 lg:px-8">
-      <div class="w-full">
-        <section class="panel-sci relative overflow-hidden p-5 md:p-7">
-          <div
-            class="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-nebula-200/80 to-transparent"
+    <!-- Header (Always visible) -->
+    <header class="relative z-20 w-full border-b border-white/8 bg-[#05010d]/50 px-6 py-4 backdrop-blur-md md:px-8">
+      <div class="mx-30px flex max-w-[1440px] items-center justify-between">
+        <h1 class="text-xl font-semibold tracking-tight text-white md:text-2xl">
+          AI Copoilot
+        </h1>
+      </div>
+    </header>
+
+    <div class="relative z-10 flex flex-1 overflow-hidden">
+      <!-- Sidebar -->
+      <aside class="flex w-64 flex-col border-r border-white/8 bg-white/2 backdrop-blur-xl">
+        <!-- Sidebar Top: Upload controls -->
+        <div class="p-4">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-medium text-white/40 uppercase tracking-widest">知识文档</span>
+            <button
+              type="button"
+              class="flex h-8 w-8 items-center justify-center rounded-lg border border-white/5 bg-white/3 text-lg text-white/40 transition hover:bg-white/8 hover:text-white/80"
+              title="选择并上传文件"
+              @click="fileInput?.click()"
+            >
+              +
+            </button>
+          </div>
+          
+          <input
+            ref="fileInput"
+            type="file"
+            class="hidden"
+            @change="handleFileChange"
           />
 
-          <h1 class="text-3xl font-semibold tracking-tight text-white md:text-4xl">
-            AI Copoilot
-          </h1>
-
-          <div class="mt-8 grid gap-5">
-            <div>
-              <label class="mb-2 block text-sm text-white/68" for="query">
-                输入你的问题
-              </label>
-              <textarea
-                id="query"
-                v-model="query"
-                class="input-sci min-h-[150px] resize-y leading-7"
-                placeholder="请输入要发送给 AI 的问题，支持 Ctrl + Enter 快速发送..."
-                @keydown.ctrl.enter.prevent="startChat"
-              />
-            </div>
-
-            <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-              <div>
-                <label class="mb-2 block text-sm text-white/68" for="fileInput">
-                  上传知识文件
-                </label>
-                <div
-                  class="rounded-2xl border border-white/10 bg-white/4 p-3 shadow-soft"
+          <div v-if="selectedFileName !== '未选择文件'" class="mb-4">
+            <div class="rounded-xl border border-nebula-500/30 bg-nebula-500/10 p-2.5">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-[10px] text-nebula-200 truncate pr-2">📎 {{ selectedFileName }}</span>
+                <button 
+                  class="text-white/40 hover:text-white text-xs" 
+                  @click="selectedFileName = '未选择文件'; if(fileInput) fileInput.value = ''"
                 >
-                  <input
-                    id="fileInput"
-                    ref="fileInput"
-                    class="block w-full cursor-pointer text-sm text-white file:mr-4 file:rounded-full file:border-0 file:bg-nebula-500/18 file:px-4 file:py-2 file:text-sm file:font-medium file:text-nebula-50 hover:file:bg-nebula-500/28"
-                    type="file"
-                    @change="handleFileChange"
-                  />
-                  <p class="mt-3 truncate text-xs text-white/42">
-                    当前文件：{{ selectedFileName }}
-                  </p>
+                  ×
+                </button>
+              </div>
+              <button
+                class="w-full btn-primary !py-1.5 !text-xs !rounded-lg"
+                type="button"
+                :disabled="isUploading"
+                @click="uploadSelectedFile"
+              >
+                <span
+                  v-if="isUploading"
+                  class="mr-2 h-3 w-3 rounded-full border-2 border-white/20 border-t-white animate-spin"
+                />
+                上传至知识库
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sidebar Content: Uploaded Files List -->
+        <div class="flex-1 overflow-y-auto px-2">
+          <div v-if="uploadedFiles.length === 0" class="flex flex-col items-center justify-center py-10 px-4 text-center">
+            <div class="mb-3 text-2xl opacity-20">📁</div>
+            <p class="text-xs text-white/30">暂无上传文档</p>
+          </div>
+          <ul v-else class="list-none m-0 p-0 space-y-1">
+            <li v-for="file in uploadedFiles" :key="file.name" class="group relative">
+              <div class="flex items-center justify-between rounded-xl px-3 py-2.5 text-sm text-white/70 transition hover:bg-white/5 hover:text-white">
+                <div class="flex items-center gap-3 overflow-hidden">
+                  <span class="text-nebula-400 shrink-0">📄</span>
+                  <span class="truncate">{{ file.name }}</span>
+                </div>
+                <div class="flex shrink-0 items-center ml-2">
+                  <span v-if="file.status === 'uploading'" class="h-3 w-3 rounded-full border-2 border-white/20 border-t-nebula-400 animate-spin" />
+                  <span v-else-if="file.status === 'success'" class="text-green-400 font-bold text-xs">√</span>
                 </div>
               </div>
+            </li>
+          </ul>
+        </div>
+      </aside>
 
-              <div class="flex flex-wrap gap-3 md:justify-end">
-                <button
-                  class="btn-secondary"
-                  type="button"
-                  :disabled="isUploading || isStreaming"
-                  @click="uploadSelectedFile"
+      <!-- Main Content Area -->
+      <main class="relative flex flex-1 flex-col overflow-hidden">
+        <!-- Output / Welcome Area -->
+        <div class="flex flex-1 flex-col overflow-y-auto py-6 px-6 md:px-1">
+          <div class="flex flex-1 flex-col items-center">
+            <!-- Welcome View (Shown when no content) -->
+            <div v-if="!hasContent && !isLoading" class="flex flex-1 flex-col items-center justify-center">
+              <h2 class="mb-12 text-4xl font-medium tracking-tight text-white/90">
+                有什么想问的吗?
+              </h2>
+            </div>
+
+            <!-- Chat Output Area -->
+            <div v-else class="w-full max-w-4xl">
+              <div
+                class="markdown-body px-4 py-4 text-base leading-7 text-white/84"
+              >
+                <div class="space-y-6">
+                  <div v-if="isLoading && !hasContent" class="space-y-4 py-6">
+                    <div class="h-4 w-[60%] animate-pulse rounded-full bg-white/5" />
+                    <div class="h-4 w-[80%] animate-pulse rounded-full bg-nebula-300/5" />
+                    <div class="h-4 w-[40%] animate-pulse rounded-full bg-white/5" />
+                  </div>
+
+                  <div v-if="hasContent" class="group/msg relative">
+                    <div
+                      class="break-words text-white/90"
+                      v-html="renderedOutput"
+                    />
+                  </div>
+
+                  <MindMap v-if="mindmapCode" :code="mindmapCode" />
+
+                  <div
+                    v-if="isStreaming"
+                    class="flex items-center gap-3 text-xs text-nebula-300/60"
+                  >
+                    <span class="relative flex h-2 w-2">
+                      <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-nebula-400 opacity-75"></span>
+                      <span class="relative inline-flex rounded-full h-2 w-2 bg-nebula-500"></span>
+                    </span>
+                    AI 正在输入...
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Input Area (Bottom) -->
+        <div class="px-6 pb-8 pt-2 md:px-10">
+          <div class="mx-auto max-w-4xl">
+            <div v-if="isChatStarted || isUploading || isReading" class="flex justify-between items-center mb-2">
+              <!-- Left side: Reading status & Toggle -->
+              <div v-if="isReading" class="flex items-center gap-3">
+                <div class="flex items-center gap-2 text-[13px] text-nebula-400 font-medium">
+                  <span class="relative flex h-2 w-2">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-nebula-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-2 w-2 bg-nebula-500"></span>
+                  </span>
+                  AI 正在朗读...
+                </div>
+                <button 
+                  @click="isMuted = !isMuted"
+                  class="flex items-center gap-1.5 rounded-lg border border-white/5 bg-white/5 px-2.5 py-1 text-[11px] text-white/50 transition hover:bg-white/10 hover:text-white"
+                  :class="{ '!text-nebula-400 !border-nebula-500/30 !bg-nebula-500/10': isMuted }"
                 >
-                  <span
-                    v-if="isUploading"
-                    class="mr-2 h-3.5 w-3.5 rounded-full border-2 border-white/20 border-t-white animate-spin"
-                  />
-                  上传文件
+                  <span v-if="isMuted">🔇 静音中</span>
+                  <span v-else>🔊 朗读中</span>
                 </button>
+              </div>
+              <div v-else></div>
+
+              <!-- Right side: General status -->
+              <span class="text-[13px] text-white/30 tracking-widest uppercase font-medium">{{ status }}</span>
+            </div>
+            <div class="panel-sci !rounded-[24px] p-2 bg-[#1a1625]/80 border-white/5 shadow-2xl">
+              <div class="flex items-center gap-2">
+                <!-- Textarea -->
+                <div class="relative flex-1">
+                  <textarea
+                    id="query-input"
+                    v-model="query"
+                    class="w-full bg-transparent border-none outline-none py-3 text-sm text-white/90 placeholder:text-white/20 resize-none max-h-[200px] min-h-[44px]"
+                    placeholder="有问题，尽管问"
+                    @keydown.ctrl.enter.prevent="startChat"
+                  />
+                  <!-- File badge if selected -->
+                  <div
+                    v-if="selectedFileName !== '未选择文件'"
+                    class="absolute -top-12 left-0 flex items-center gap-2 rounded-lg bg-nebula-500/20 border border-nebula-500/30 px-3 py-1.5 text-[10px] text-nebula-200 backdrop-blur-md"
+                  >
+                    <span>📎</span>
+                    <span class="max-w-[150px] truncate">{{ selectedFileName }}</span>
+                    <button 
+                      class="ml-1 text-white/40 hover:text-white" 
+                      @click="selectedFileName = '未选择文件'; if(fileInput) fileInput.value = ''"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Action Button -->
                 <button
-                  class="btn-primary min-w-[160px]"
+                  class="btn-primary !rounded-2xl h-10 px-6 min-w-[100px] !text-xs font-bold tracking-wide"
                   type="button"
                   :disabled="!canSend"
                   @click="startChat"
                 >
-                  <span v-if="isLoading" class="mr-2 inline-flex items-center gap-1.5">
-                    <span class="loading-dot" />
-                    <span class="loading-dot" />
-                    <span class="loading-dot" />
+                  <span v-if="isLoading" class="mr-2 inline-flex items-center gap-1">
+                    <span class="loading-dot !w-1 !h-1" />
+                    <span class="loading-dot !w-1 !h-1" />
                   </span>
-                  {{ isStreaming ? '对话中...' : '开始对话' }}
+                  {{ isStreaming ? '对话中' : '开始对话' }}
                 </button>
               </div>
             </div>
+            <p class="mt-4 text-center text-[14px] text-white/30 tracking-tight">
+              AI 可能会产生错误，请核查重要信息。
+            </p>
           </div>
-
-          <div class="mt-6 rounded-3xl border border-white/10 bg-[#0b0715]/90 shadow-soft">
-            <div
-              class="flex items-center justify-between border-b border-white/8 px-4 py-3 text-xs tracking-[0.2em] text-white/40 uppercase"
-            >
-              <span>实时输出</span>
-              <span class="text-nebula-100/80">{{ status }}</span>
-            </div>
-
-            <div
-              class="markdown-body max-h-[460px] min-h-[320px] overflow-y-auto px-4 py-4 text-sm leading-7 text-white/84"
-            >
-              <div
-                v-if="!hasContent && !isLoading"
-                class="flex min-h-[288px] items-center justify-center text-center text-white/34"
-              >
-                发送问题后，AI 的流式内容会持续显示在这里。
-              </div>
-
-              <div v-else class="space-y-4">
-                <div v-if="isLoading && !hasContent" class="space-y-3 py-3">
-                  <div class="h-4 w-[72%] animate-pulse rounded-full bg-white/8" />
-                  <div class="h-4 w-[88%] animate-pulse rounded-full bg-nebula-300/10" />
-                  <div class="h-4 w-[66%] animate-pulse rounded-full bg-white/8" />
-                  <div class="h-4 w-[80%] animate-pulse rounded-full bg-nebula-300/10" />
-                </div>
-
-                <div
-                  v-if="hasContent"
-                  class="break-words text-white/88"
-                  v-html="renderedOutput"
-                />
-
-                <div
-                  v-if="isStreaming"
-                  class="inline-flex items-center gap-2 rounded-full border border-nebula-300/20 bg-nebula-400/8 px-3 py-1.5 text-xs text-nebula-100/88"
-                >
-                  <span class="h-2 w-2 rounded-full bg-nebula-300 shadow-[0_0_12px_rgba(167,139,250,0.95)]" />
-                  AI 流式生成中
-                </div>
-              </div>
-            </div>
-          </div>
-          <audio ref="audioRef" autoplay preload="none" class="hidden" />
-        </section>
-      </div>
-    </main>
+        </div>
+      </main>
+    </div>
+    <audio ref="audioRef" autoplay preload="none" class="hidden" />
   </div>
 </template>
 
