@@ -42,7 +42,7 @@ const canSend = computed(
 )
 
 const mindmapCode = computed(() => {
-  const match = output.value.match(/```mindmap\n([\s\S]*?)\n```/)
+  const match = output.value.match(/```mindmap\s*\n([\s\S]*?)\n```/i)
   return match ? match[1] : ''
 })
 
@@ -50,11 +50,49 @@ const cleanOutput = computed(() => {
   return output.value.replace(/```mindmap\n[\s\S]*?\n```/g, '').trim()
 })
 
-const renderedOutput = computed(() =>
-  DOMPurify.sanitize(marked.parse(cleanOutput.value, { breaks: true }) as string),
-)
+const renderedOutput = computed(() => {
+  let content = cleanOutput.value;
+  
+  // 将 [cite: index] 转换为可点击的 UI
+  content = content.replace(/\[cite:\s*(\d+)\]/g, (match, index) => {
+    return `<span class="citation-tag" data-index="${index}">[${index}]</span>`;
+  });
 
-interface UploadProgressPayload {
+  // 处理最后的“引用来源:”列表，使其更有设计感
+  content = content.replace(/引用来源:\s*([\s\S]*)$/i, (match, list) => {
+    const items = list.trim().split('\n').filter(l => l.trim().startsWith('-'));
+    if (items.length === 0) return match;
+
+    const cards = items.map(item => {
+       const citeMatch = item.match(/\[cite:\s*(\d+)\]\s*(.*)\s*\(匹配度:\s*([\d.]+),\s*页码:\s*(\d+)\)/);
+       if (!citeMatch) return `<div class="citation-card-simple">${item}</div>`;
+ 
+       const [_, index, title, score, page] = citeMatch;
+       return `
+         <div class="citation-card" 
+              data-title="${title}" 
+              data-page="${page}" 
+              data-score="${score}">
+           <div class="citation-card-index">${index}</div>
+           <div class="citation-card-content">
+             <div class="citation-card-title">${title}</div>
+             <div class="citation-card-meta">
+               <span class="citation-score">匹配度: ${score}</span>
+               <span class="citation-page">页码: ${page}</span>
+             </div>
+           </div>
+           <div class="citation-card-action">点击定位</div>
+         </div>
+       `;
+     }).join('');
+
+    return `<div class="citations-container"><div class="citations-header">引用来源</div>${cards}</div>`;
+  });
+
+  return DOMPurify.sanitize(marked.parse(content, { breaks: true }) as string);
+ })
+ 
+ interface UploadProgressPayload {
   taskId?: string
   stage?: string
   status?: string
@@ -133,6 +171,21 @@ function renderUploadProgress(progress: UploadProgressPayload) {
   // Skip the initial "waiting" message to avoid status flicker
   if (message === '等待上传开始') {
     return
+  }
+
+  // If we have a filename in progress, update its status in the sidebar
+  if (progress.fileName) {
+    const fileObj = uploadedFiles.value.find(f => f.name === progress.fileName)
+    if (fileObj) {
+      if (progress.status === 'completed' || message.includes('Verified')) {
+        fileObj.status = 'success'
+      } else if (progress.status === 'failed') {
+        // You might want a 'failed' status in uploadedFiles too, but keeping it simple for now
+        fileObj.status = 'uploading' 
+      } else {
+        fileObj.status = 'uploading'
+      }
+    }
   }
 
   if (message === '上传完成' || progress.status === 'completed') {
@@ -450,8 +503,7 @@ async function uploadSelectedFile() {
       }, 1000)
 
       if (result === '上传完成' || result.includes('完成')) {
-        const fileObj = uploadedFiles.value.find(f => f.name === file.name)
-        if (fileObj) fileObj.status = 'success'
+        // Wait for progress stream
       }
       isUploading.value = false
     } else {
@@ -461,9 +513,6 @@ async function uploadSelectedFile() {
       setTimeout(() => {
         status.value = '状态：待机'
       }, 1000)
-
-      const fileObj = uploadedFiles.value.find(f => f.name === file.name)
-      if (fileObj) fileObj.status = 'success'
     }
   } catch (error) {
     status.value = '状态：文件上传失败'
@@ -542,6 +591,23 @@ watch(()=>selectedFileName.value, (newVal) => {
   }
 })
 
+function handleCitationClick(e: MouseEvent) {
+  const card = (e.target as HTMLElement).closest('.citation-card') as HTMLElement;
+  if (card) {
+    const title = card.getAttribute('data-title') || '';
+    const page = parseInt(card.getAttribute('data-page') || '1');
+    const score = parseFloat(card.getAttribute('data-score') || '0');
+    
+    locateCitation(title, page, score);
+  }
+}
+
+function locateCitation(title: string, page: number, score: number) {
+  console.log(`Locating: ${title}, Page: ${page}, Score: ${score}`);
+  status.value = `正在定位：${title} 第 ${page} 页 (匹配度: ${score})`;
+  window.alert(`定位到原文：\n文档：${title}\n页码：第 ${page} 页\n匹配度：${score.toFixed(4)}`);
+}
+
 onMounted(() => {
   if (audioRef.value) {
     audioRef.value.onplaying = () => { isReading.value = true }
@@ -579,7 +645,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Header (Always visible) -->
-    <header class="relative z-20 w-full border-b border-white/8 bg-[#05010d]/50 px-6 py-4 backdrop-blur-md md:px-8">
+    <header class="relative z-20 w-full border-b border-white/8 bg-[#05010d]/50 px-6 py-2 backdrop-blur-md md:px-8">
       <div class="mx-30px flex max-w-[1440px] items-center justify-between">
         <h1 class="text-xl font-semibold tracking-tight text-white md:text-2xl">
           AI Copoilot
@@ -652,7 +718,7 @@ onBeforeUnmount(() => {
                   <span class="truncate">{{ file.name }}</span>
                 </div>
                 <div class="flex shrink-0 items-center ml-2">
-                  <span v-if="file.status === 'uploading'" class="h-3 w-3 rounded-full border-2 border-white/20 border-t-nebula-400 animate-spin" />
+                  <span v-if="file.status === 'uploading'" class="h-3 w-3 rounded-full border-2 border-gray-500/20 border-t-gray-500 animate-spin" />
                   <span v-else-if="file.status === 'success'" class="text-green-400 font-bold text-xs">√</span>
                 </div>
               </div>
@@ -689,6 +755,7 @@ onBeforeUnmount(() => {
                     <div
                       class="break-words text-white/90"
                       v-html="renderedOutput"
+                      @click="handleCitationClick"
                     />
                   </div>
 
@@ -847,8 +914,111 @@ onBeforeUnmount(() => {
 
 .markdown-body :deep(a) {
   color: #c4b5fd;
+  text-decoration: none;
+}
+
+.markdown-body :deep(a:hover) {
   text-decoration: underline;
-  text-underline-offset: 3px;
+}
+
+/* Citation Styles */
+.markdown-body :deep(.citation-tag) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(196, 181, 253, 0.15);
+  color: #c4b5fd;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 4px;
+  padding: 0 4px;
+  margin: 0 2px;
+  cursor: help;
+  border: 1px solid rgba(196, 181, 253, 0.3);
+  vertical-align: super;
+}
+
+.markdown-body :deep(.citations-container) {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.markdown-body :deep(.citations-header) {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+  margin-bottom: 1rem;
+}
+
+.markdown-body :deep(.citation-card) {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.markdown-body :deep(.citation-card:hover) {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(196, 181, 253, 0.3);
+  transform: translateY(-1px);
+}
+
+.markdown-body :deep(.citation-card-index) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: rgba(196, 181, 253, 0.2);
+  color: #c4b5fd;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.markdown-body :deep(.citation-card-content) {
+  flex: 1;
+  min-width: 0;
+}
+
+.markdown-body :deep(.citation-card-title) {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.markdown-body :deep(.citation-card-meta) {
+  display: flex;
+  gap: 12px;
+  margin-top: 2px;
+}
+
+.markdown-body :deep(.citation-score),
+.markdown-body :deep(.citation-page) {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.markdown-body :deep(.citation-card-action) {
+  font-size: 11px;
+  color: #c4b5fd;
+  font-weight: 500;
+  opacity: 0.6;
+}
+
+.markdown-body :deep(.citation-card:hover .citation-card-action) {
+  opacity: 1;
 }
 
 .markdown-body :deep(code) {
