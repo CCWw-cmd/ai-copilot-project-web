@@ -6,6 +6,101 @@ import { useRag } from './useRag'
 import { useChat } from './useChat'
 import { useVideo } from './useVideo'
 
+type ChatRole = 'user' | 'assistant'
+
+interface ChatMessage {
+  id: string
+  role: ChatRole
+  content: string
+  createdAt: number
+}
+
+interface Conversation {
+  id: string
+  title: string
+  updatedAt: number
+  messages: ChatMessage[]
+}
+
+const STORAGE_KEY = 'ai-copilot-conversations-v1'
+const UNTITLED_CONVERSATION = '新对话'
+const DEFAULT_MODEL_NAME = '默认模型'
+
+function createId(prefix: string) {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+function createConversation(title = UNTITLED_CONVERSATION): Conversation {
+  return {
+    id: createId('conversation'),
+    title,
+    updatedAt: Date.now(),
+    messages: []
+  }
+}
+
+function normalizeConversation(raw: unknown): Conversation | null {
+  if (!raw || typeof raw !== 'object') return null
+
+  const candidate = raw as Partial<Conversation>
+  if (typeof candidate.id !== 'string') return null
+
+  const messages = Array.isArray(candidate.messages)
+    ? candidate.messages
+      .filter((message) => message && typeof message === 'object')
+      .map((message) => {
+        const msg = message as Partial<ChatMessage>
+        return {
+          id: typeof msg.id === 'string' ? msg.id : createId('message'),
+          role: msg.role === 'user' ? 'user' : 'assistant',
+          content: typeof msg.content === 'string' ? msg.content : '',
+          createdAt: typeof msg.createdAt === 'number' ? msg.createdAt : Date.now()
+        } satisfies ChatMessage
+      })
+    : []
+
+  return {
+    id: candidate.id,
+    title: typeof candidate.title === 'string' && candidate.title.trim()
+      ? candidate.title.trim()
+      : UNTITLED_CONVERSATION,
+    updatedAt: typeof candidate.updatedAt === 'number' ? candidate.updatedAt : Date.now(),
+    messages
+  }
+}
+
+function loadStoredConversations() {
+  if (typeof window === 'undefined') {
+    return [createConversation()]
+  }
+
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY)
+    if (!raw) {
+      return [createConversation()]
+    }
+
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) {
+      return [createConversation()]
+    }
+
+    const conversations = parsed
+      .map(normalizeConversation)
+      .filter((item): item is Conversation => Boolean(item))
+
+    return conversations.length > 0 ? conversations : [createConversation()]
+  } catch {
+    return [createConversation()]
+  }
+}
+
+function buildConversationTitle(text: string) {
+  const normalized = text.replace(/\s+/g, ' ').trim()
+  if (!normalized) return UNTITLED_CONVERSATION
+  return normalized.length > 22 ? `${normalized.slice(0, 22)}...` : normalized
+}
+
 export function useAppLogic() {
   const { message } = createDiscreteApi(['message'], {
     configProviderProps: computed(() => ({
@@ -16,35 +111,31 @@ export function useAppLogic() {
   const query = ref('')
   const exportContentRef = ref<HTMLElement | null>(null)
   const sidebarRef = ref<any>(null)
+  const conversations = ref<Conversation[]>(loadStoredConversations())
+  const currentConversationId = ref(conversations.value[0]?.id ?? createConversation().id)
+  const streamingConversationId = ref('')
+  const streamingAssistantMessageId = ref('')
 
   // 使用组合式函数提取逻辑
   const { isExporting, exportToPdf } = usePdfExport()
 
-  const pageTitle = computed(() => {
-    if (!output.value) return ''
-    
-    // 尝试提取第一个标题 (# 标题) 或 加粗标题 (**标题**)
-    const lines = output.value.split('\n')
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (!trimmed) continue
-      
-      // 移除可能存在的 emoji (简单处理)
-      const cleanLine = trimmed.replace(/[\u{1F300}-\u{1F9FF}]/gu, '').trim()
-      
-      // 匹配 # 标题
-      const hMatch = cleanLine.match(/^#+\s+(.+)$/)
-      if (hMatch) return hMatch[1].trim()
-      
-      // 匹配 **标题** (可能包含在行内)
-      const bMatch = cleanLine.match(/\*\*(.+?)\*\*/)
-      if (bMatch) return bMatch[1].trim()
-      
-      // 如果没有 Markdown 标记，取第一行非空文本
-      return cleanLine || trimmed
-    }
-    return ''
-  })
+  const currentConversation = computed(() =>
+    conversations.value.find((item) => item.id === currentConversationId.value) ?? conversations.value[0],
+  )
+
+  const conversationMessages = computed(() => currentConversation.value?.messages ?? [])
+  const conversationList = computed(() =>
+    [...conversations.value].sort((a, b) => b.updatedAt - a.updatedAt),
+  )
+  const currentConversationTitle = computed(() => currentConversation.value?.title ?? UNTITLED_CONVERSATION)
+  const streamingConversation = computed(() =>
+    conversations.value.find((item) => item.id === streamingConversationId.value) ?? null,
+  )
+  const isCurrentConversationStreaming = computed(
+    () => isStreaming.value && streamingConversationId.value === currentConversationId.value,
+  )
+
+  const pageTitle = computed(() => currentConversationTitle.value)
 
   const triggerPdfExport = (el?: HTMLElement | null) => {
     const targetEl = el || exportContentRef.value
@@ -62,11 +153,13 @@ export function useAppLogic() {
   } = useTts()
   
   const { 
+    selectedFile: selectedRagFile,
     selectedFileName, 
     uploadedFiles, 
     isUploading, 
     status: ragStatus, 
-    output: ragOutput, 
+    selectFile: selectRagFile,
+    clearSelectedFile,
     uploadSelectedFile, 
     removeFile, 
     closeRagProgressEventSource 
@@ -81,39 +174,67 @@ export function useAppLogic() {
     output: chatOutput, 
     status: chatStatus, 
     startChat: startChatLogic, 
-    closeEventSource 
+    closeEventSource,
+    resetChatState
   } = useChat()
 
   const {
     selectedVideoName,
-    videoPath,
+    selectedImageName,
+    mediaPath: videoPath,
     previewUrl,
+    mediaType,
     isUploading: isUploadingVideo,
     uploadProgress: videoUploadProgress,
-    uploadVideo,
-    clearVideo
+    uploadMedia,
+    clearMedia: clearVideo
   } = useVideo()
 
   // 综合状态管理
   const status = computed(() => {
-    if (isUploading.value) return ragStatus.value
-    if (isUploadingVideo.value) return `状态：视频上传中 ${videoUploadProgress.value}%`
+    // 优先显示 RAG (上传/处理) 状态，只要不是“待机”就显示
+    if (ragStatus.value !== '状态：待机' && ragStatus.value !== '') {
+      return ragStatus.value
+    }
+    // 其次显示视频上传状态
+    if (isUploadingVideo.value) {
+      return `状态：视频上传中 ${videoUploadProgress.value}%`
+    }
+    if (isStreaming.value && !isCurrentConversationStreaming.value && streamingConversation.value) {
+      return `状态：${streamingConversation.value.title} 正在后台生成`
+    }
+    // 最后显示对话状态
     return chatStatus.value
   })
 
-  const output = computed({
-    get: () => isUploading.value ? ragOutput.value : chatOutput.value,
-    set: (val) => {
-      // 主要是为了支持外部直接设置 output 的情况（如报错显示）
-      if (isUploading.value) ragOutput.value = val
-      else chatOutput.value = val
+  const displayCurrentAction = computed(() => {
+    if (isCurrentConversationStreaming.value) {
+      return currentAction.value
     }
+    if (isStreaming.value && streamingConversation.value) {
+      return `${streamingConversation.value.title} 正在后台生成...`
+    }
+    return ''
   })
 
-  const hasContent = computed(() => output.value.trim().length > 0)
-  const isSystemError = computed(() => output.value.includes('【系统提示】'))
-  
+  const output = computed(() => chatOutput.value)
+
+  const hasContent = computed(() =>
+    conversationMessages.value.some((message) => message.content.trim().length > 0),
+  )
+  const isSystemError = computed(() =>
+    conversationMessages.value.some((message) => message.content.includes('【系统提示】')),
+  )
+
   const showPdfButton = computed(() => hasContent.value && !isSystemError.value)
+  const knowledgeBaseStatus = computed(() => {
+    if (isUploading.value) return '知识库处理中'
+    if (selectedFileName.value !== '未选择文件') return '待上传文档'
+    if (selectedVideoName.value !== '未选择视频') return '已关联视频'
+    if (selectedImageName.value !== '未选择图片') return '已关联图片'
+    if (uploadedFiles.value.length === 0) return '未加载知识库'
+    return `已加载 ${uploadedFiles.value.length} 份文档`
+  })
 
   const isLoading = computed(
     () => isConnecting.value || (isStreaming.value && !hasReceivedChunk.value) || isUploadingVideo.value,
@@ -122,34 +243,129 @@ export function useAppLogic() {
     () => !isUploading.value && !isStreaming.value && !isUploadingVideo.value && query.value.trim().length > 0,
   )
 
-  function handleFileChange(event: Event) {
-    const file = (event.target as HTMLInputElement).files?.[0]
-    if (file?.type.startsWith('video/')) {
-      uploadVideo(file)
+  function updateConversation(conversationId: string, updater: (conversation: Conversation) => void) {
+    const conversation = conversations.value.find((item) => item.id === conversationId)
+    if (!conversation) return
+    updater(conversation)
+  }
+
+  function persistConversations() {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations.value))
+  }
+
+  function stopStreamingConversation() {
+    streamingConversationId.value = ''
+    streamingAssistantMessageId.value = ''
+    closeEventSource()
+    resetChatState()
+  }
+
+  function resetComposerState() {
+    query.value = ''
+  }
+
+  function createNewConversation() {
+    resetComposerState()
+
+    const conversation = createConversation()
+    conversations.value = [conversation, ...conversations.value]
+    currentConversationId.value = conversation.id
+  }
+
+  function switchConversation(conversationId: string) {
+    if (conversationId === currentConversationId.value) return
+
+    resetComposerState()
+    currentConversationId.value = conversationId
+  }
+
+  function renameConversation(conversationId: string, title: string) {
+    const normalizedTitle = title.trim()
+    if (!normalizedTitle) {
+      message.warning('会话标题不能为空')
+      return
+    }
+
+    updateConversation(conversationId, (conversation) => {
+      conversation.title = normalizedTitle
+      conversation.updatedAt = Date.now()
+    })
+  }
+
+  function deleteConversation(conversationId: string) {
+    const conversation = conversations.value.find((item) => item.id === conversationId)
+    if (!conversation) return
+
+    conversations.value = conversations.value.filter((item) => item.id !== conversationId)
+
+    if (conversations.value.length === 0) {
+      const nextConversation = createConversation()
+      conversations.value = [nextConversation]
+      currentConversationId.value = nextConversation.id
+    } else if (currentConversationId.value === conversationId) {
+      currentConversationId.value = conversationList.value[0]?.id ?? conversations.value[0].id
+    }
+
+    if (streamingConversationId.value === conversationId) {
+      stopStreamingConversation()
     } else {
-      selectedFileName.value = file?.name ?? '未选择文件'
+      resetComposerState()
     }
   }
 
+  function clearCurrentConversation() {
+    if (!currentConversation.value) return
+
+    if (streamingConversationId.value === currentConversation.value.id) {
+      stopStreamingConversation()
+    } else {
+      resetComposerState()
+    }
+    updateConversation(currentConversation.value.id, (conversation) => {
+      conversation.messages = []
+      conversation.title = UNTITLED_CONVERSATION
+      conversation.updatedAt = Date.now()
+    })
+  }
+
+  function handleFileChange(event: Event) {
+    const input = event.target as HTMLInputElement
+    const file = input.files?.[0]
+    if (!file) return
+
+    // 知识库不再允许添加视频和图片
+    if (file.type.startsWith('video/') || file.type.startsWith('image/')) {
+      message.warning('知识库仅支持文档格式（PDF、DOCX、TXT 等）')
+      input.value = ''
+      return
+    }
+
+    selectRagFile(file)
+    input.value = ''
+  }
+
+  function handleChatFileChange(event: Event) {
+    const input = event.target as HTMLInputElement
+    const file = input.files?.[0]
+    if (!file) return
+
+    if (file.type.startsWith('video/') || file.type.startsWith('image/')) {
+      uploadMedia(file)
+    } else {
+      message.warning('聊天仅支持图片和视频上传')
+    }
+
+    input.value = ''
+  }
+
   function handleRemoveFile(fileName: string) {
-    if (fileName === selectedVideoName.value) {
+    if (fileName === selectedVideoName.value || fileName === selectedImageName.value) {
       clearVideo()
     } else {
       removeFile(fileName)
     }
-    if (selectedFileName.value === '未选择文件' && selectedVideoName.value === '未选择视频' && sidebarRef.value?.fileInput) {
-      sidebarRef.value.fileInput.value = ''
-    }
-  }
-
-  async function handleUpload() {
-    const file = sidebarRef.value?.fileInput?.files?.[0]
-    if (file?.type.startsWith('video/')) {
-      await uploadVideo(file)
-    } else {
-      await uploadSelectedFile(file)
-    }
-    if (selectedFileName.value === '未选择文件' && selectedVideoName.value === '未选择视频' && sidebarRef.value?.fileInput) {
+    if (selectedFileName.value === '未选择文件' && selectedVideoName.value === '未选择视频' && selectedImageName.value === '未选择图片' && sidebarRef.value?.fileInput) {
       sidebarRef.value.fileInput.value = ''
     }
   }
@@ -157,13 +373,41 @@ export function useAppLogic() {
   async function startChat() {
     const currentQuery = query.value.trim()
     if (!currentQuery) return
-    
+
+    const conversation = currentConversation.value ?? conversations.value[0]
+    if (!conversation) return
+
+    const userMessage: ChatMessage = {
+      id: createId('message'),
+      role: 'user',
+      content: currentQuery,
+      createdAt: Date.now()
+    }
+
+    const assistantMessage: ChatMessage = {
+      id: createId('message'),
+      role: 'assistant',
+      content: '',
+      createdAt: Date.now()
+    }
+
+    updateConversation(conversation.id, (target) => {
+      if (target.messages.length === 0 || target.title === UNTITLED_CONVERSATION) {
+        target.title = buildConversationTitle(currentQuery)
+      }
+      target.messages.push(userMessage, assistantMessage)
+      target.updatedAt = Date.now()
+    })
+
+    streamingConversationId.value = conversation.id
+    streamingAssistantMessageId.value = assistantMessage.id
+
     await startChatLogic(currentQuery, ttsSessionId, resetTtsPlayer, ensureTtsConnection, videoPath.value)
-    query.value = '' // 发送后清空输入框
+    query.value = ''
   }
 
   function clearAllFiles() {
-    selectedFileName.value = '未选择文件'
+    clearSelectedFile()
     if (sidebarRef.value?.fileInput) {
       sidebarRef.value.fileInput.value = ''
     }
@@ -183,6 +427,42 @@ export function useAppLogic() {
       isUploading.value = false
     }
   })
+
+  watch(
+    chatOutput,
+    (value) => {
+      if (!streamingConversationId.value || !streamingAssistantMessageId.value) return
+
+      updateConversation(streamingConversationId.value, (conversation) => {
+        const assistantMessage = conversation.messages.find(
+          (message) => message.id === streamingAssistantMessageId.value,
+        )
+
+        if (!assistantMessage) return
+
+        assistantMessage.content = value
+        conversation.updatedAt = Date.now()
+      })
+    },
+    { flush: 'sync' },
+  )
+
+  watch(isStreaming, (streaming) => {
+    if (streaming) return
+    streamingConversationId.value = ''
+    streamingAssistantMessageId.value = ''
+  })
+
+  watch(
+    conversations,
+    () => {
+      if (!currentConversation.value && conversations.value[0]) {
+        currentConversationId.value = conversations.value[0].id
+      }
+      persistConversations()
+    },
+    { deep: true },
+  )
 
   onMounted(() => {
     initAudioListeners()
@@ -205,29 +485,45 @@ export function useAppLogic() {
     isMuted,
     audioRef,
     selectedFileName,
+    selectedRagFile,
     uploadedFiles,
     isUploading,
     status,
     output,
+    conversations: conversationList,
+    currentConversationId,
+    currentConversationTitle,
+    conversationMessages,
+    streamingAssistantMessageId,
+    isCurrentConversationStreaming,
+    knowledgeBaseStatus,
+    modelName: DEFAULT_MODEL_NAME,
     isChatStarted,
     isConnecting,
     isStreaming,
-    currentAction,
+    currentAction: displayCurrentAction,
     hasReceivedChunk,
     hasContent,
     showPdfButton,
     isLoading,
     canSend,
     handleFileChange,
+    handleChatFileChange,
     handleRemoveFile,
-    handleUpload,
+    createNewConversation,
+    switchConversation,
+    renameConversation,
+    deleteConversation,
+    clearCurrentConversation,
     startChat,
     clearFile: clearAllFiles,
     uploadSelectedFile,
     removeFile,
     selectedVideoName,
+    selectedImageName,
     videoPath,
     previewUrl,
+    mediaType,
     isUploadingVideo,
     videoUploadProgress
   }

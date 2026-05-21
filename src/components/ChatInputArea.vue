@@ -1,7 +1,7 @@
 <template>
-  <div class="px-6 pb-8 pt-2 md:px-10">
-    <div class="mx-auto max-w-4xl">
-      <div v-if="isChatStarted || isUploading || isReading" class="flex justify-between items-center mb-2 h-8">
+  <div class="absolute bottom-10px left-4 right-4 px-4 pt-3 md:px-6">
+    <div class="mx-auto max-w-5xl">
+      <div v-if="isChatStarted || isUploading || isReading" class="mb-3 flex min-h-8 items-center justify-between">
         <div v-if="isReading" class="flex items-center gap-3">
           <n-text depth="3" class="flex items-center gap-2 text-[13px] font-medium text-nebula-400">
             <span class="relative flex h-2 w-2">
@@ -14,74 +14,111 @@
             size="tiny"
             secondary
             :type="isMuted ? 'primary' : 'default'"
-            @click="$emit('update:isMuted', !isMuted)"
             class="!rounded-lg"
+            @click="$emit('update:isMuted', !isMuted)"
           >
-            {{ isMuted ? '🔇 静音中' : '🔊 朗读中' }}
+            {{ isMuted ? '静音中' : '朗读中' }}
           </n-button>
         </div>
       </div>
 
-      <n-card 
-        class="!bg-[#1a1625]/80 !border-white/5 shadow-2xl !rounded-[24px] transition-all duration-300 focus-within:!border-nebula-500/60 focus-within:!shadow-[0_0_0_3px_rgba(139,92,246,0.18)]" 
-        content-style="padding: 8px 12px"
+      <n-card
+        class="!rounded-[28px] !border-white/8 !bg-#25222C shadow-[0_20px_50px_rgba(5,1,13,0.18)] backdrop-blur-2xl transition-all duration-300 focus-within:!border-nebula-500/60 focus-within:!shadow-[0_0_0_3px_rgba(139,92,246,0.16)]"
+        content-style="padding: 10px"
       >
-        <div class="flex items-end gap-2">
-          <div class="relative flex-1">
+        <div
+          v-if="selectedFileName !== '未选择文件' || selectedVideoName !== '未选择视频' || selectedImageName !== '未选择图片'"
+          class="mb-3 flex flex-wrap gap-2"
+        >
+          <n-tag
+            v-if="selectedFileName !== '未选择文件'"
+            closable
+            type="primary"
+            round
+            size="small"
+            class="!border-nebula-500/30 !bg-nebula-500/20 !text-nebula-200 backdrop-blur-md"
+            @close="$emit('clear-file')"
+          >
+            <template #icon>📎</template>
+            {{ selectedFileName }}
+          </n-tag>
+          <n-tag
+            v-if="selectedImageName !== '未选择图片'"
+            closable
+            type="warning"
+            round
+            size="small"
+            class="!border-amber-500/30 !bg-amber-500/20 !text-amber-200 backdrop-blur-md cursor-pointer hover:!bg-amber-500/30 transition-colors"
+            @close="$emit('clear-file')"
+            @click="$emit('preview-video')"
+          >
+            <template #icon>🖼️</template>
+            {{ selectedImageName }}
+          </n-tag>
+          <n-tag
+            v-if="selectedVideoName !== '未选择视频'"
+            closable
+            type="success"
+            round
+            size="small"
+            class="!border-emerald-500/30 !bg-emerald-500/20 !text-emerald-200 backdrop-blur-md cursor-pointer hover:!bg-emerald-500/30 transition-colors"
+            @close="$emit('clear-file')"
+            @click="$emit('preview-video')"
+          >
+            <template #icon>🎬</template>
+            {{ selectedVideoName }}
+          </n-tag>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <div class="pl-2">
+            <n-button
+              circle
+              quaternary
+              class="!text-white/40 hover:!text-white hover:!bg-white/10"
+              @click="chatFileInput?.click()"
+            >
+              <template #icon>
+                <svg viewBox="0 0 24 24" fill="none" class="h-5 w-5">
+                  <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+                </svg>
+              </template>
+            </n-button>
+            <input
+              ref="chatFileInput"
+              type="file"
+              class="hidden"
+              accept="image/*,video/*"
+              @change="$emit('file-change', $event)"
+            />
+          </div>
+
+          <div class="flex-1 px-2">
             <n-input
               :value="query"
-              @update:value="$emit('update:query', $event)"
               type="textarea"
-              placeholder="有问题，尽管问"
+              placeholder="输入你的问题，按 Ctrl + Enter 发送"
               :autosize="{ minRows: 1, maxRows: 8 }"
               :bordered="false"
               class="!bg-transparent shadow-none"
+              @update:value="$emit('update:query', $event)"
               @keydown.ctrl.enter.prevent="$emit('send')"
             />
-            <div
-              v-if="selectedFileName !== '未选择文件' || selectedVideoName !== '未选择视频'"
-              class="absolute -top-14 left-0 flex gap-2"
-            >
-              <n-tag
-                v-if="selectedFileName !== '未选择文件'"
-                closable
-                @close="$emit('clear-file')"
-                type="primary"
-                round
-                size="small"
-                class="!bg-nebula-500/20 !border-nebula-500/30 !text-nebula-200 backdrop-blur-md"
-              >
-                <template #icon>📎</template>
-                {{ selectedFileName }}
-              </n-tag>
-              <n-tag
-                v-if="selectedVideoName !== '未选择视频'"
-                closable
-                @close="$emit('clear-file')"
-                @click="$emit('preview-video')"
-                type="success"
-                round
-                size="small"
-                class="!bg-emerald-500/20 !border-emerald-500/30 !text-emerald-200 backdrop-blur-md cursor-pointer hover:!bg-emerald-500/30 transition-colors"
-              >
-                <template #icon>🎬</template>
-                {{ selectedVideoName }}
-              </n-tag>
-            </div>
           </div>
 
           <n-button
             type="primary"
-            class="!rounded-2xl h-10 px-6 min-w-[100px]"
+            class="!h-8 !rounded-full px-10 !bg-gradient-to-r !from-violet-500 !to-fuchsia-500 !border-none shadow-[0_10px_25px_rgba(139,92,246,0.28)]"
             :disabled="!canSend"
             :loading="isLoading && !hasReceivedChunk"
             @click="$emit('send')"
           >
-            {{ isStreaming ? '对话中' : '开始对话' }}
+            {{ isStreaming ? '生成中' : '发送' }}
           </n-button>
         </div>
       </n-card>
-      <n-text depth="3" class="mt-4 block text-center text-[14px] tracking-tight">
+
+      <n-text depth="3" class="mt-5px block text-center text-[13px] tracking-tight text-white/45">
         AI 可能会产生错误，请核查重要信息。
       </n-text>
     </div>
@@ -89,6 +126,8 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
+
 defineProps<{
   query: string
   isChatStarted: boolean
@@ -101,7 +140,10 @@ defineProps<{
   hasReceivedChunk: boolean
   selectedFileName: string
   selectedVideoName: string
+  selectedImageName: string
 }>()
 
-defineEmits(['update:query', 'update:isMuted', 'send', 'clear-file', 'preview-video'])
+defineEmits(['update:query', 'update:isMuted', 'send', 'clear-file', 'preview-video', 'file-change'])
+
+const chatFileInput = ref<HTMLInputElement | null>(null)
 </script>

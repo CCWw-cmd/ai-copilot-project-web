@@ -1,5 +1,6 @@
 import { ref, onBeforeUnmount } from 'vue'
 import { API_BASE_URL } from './http'
+import { isFreeTierExhausted, FREE_TIER_EXHAUSTED_MSG } from './utils'
 import { createDiscreteApi, darkTheme } from 'naive-ui'
 
 const { message: nMessage } = createDiscreteApi(['message'], {
@@ -26,6 +27,15 @@ export function useChat() {
     }
     isConnecting.value = false
     isStreaming.value = false
+  }
+
+  function resetChatState() {
+    closeEventSource()
+    isChatStarted.value = false
+    hasReceivedChunk.value = false
+    output.value = ''
+    status.value = '状态：待机'
+    currentAction.value = ''
   }
 
   async function startChat(
@@ -98,8 +108,8 @@ export function useChat() {
       const data = event.data
 
       if (data && typeof data === 'string') {
-        if (data.includes('free tier') && data.includes('exhausted')) {
-          errorMsg = '抱歉，AI 模型免费额度已用尽，请稍后再试或切换模型。'
+        if (isFreeTierExhausted(data)) {
+          errorMsg = FREE_TIER_EXHAUSTED_MSG
           nMessage.error('模型用量已耗尽')
         } else {
           errorMsg = `服务异常: ${data}`
@@ -116,7 +126,7 @@ export function useChat() {
       closeEventSource()
     })
 
-    es.onerror = (e) => {
+    es.onerror = () => {
       // 如果已经通过 addEventListener('error') 处理过了，这里就不重复处理
       if (es === null) return 
 
@@ -140,6 +150,7 @@ export function useChat() {
     status,
     currentAction,
     startChat,
-    closeEventSource
+    closeEventSource,
+    resetChatState
   }
 }

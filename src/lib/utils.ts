@@ -8,17 +8,17 @@ export function renderMarkdown(markdown: string): string {
   let content = markdown
 
   // 将 [cite: index] 转换为可点击的 UI
-  content = content.replace(/\[cite:\s*(\d+)\]/g, (match, index) => {
+  content = content.replace(/\[cite:\s*(\d+)\]/g, (_match: string, index: string) => {
     return `<span class="citation-tag" data-index="${index}">[${index}]</span>`
   })
 
   // 处理最后的“引用来源:”列表，使其更有设计感
-  content = content.replace(/引用来源:\s*([\s\S]*)$/i, (match, list) => {
-    const items = list.trim().split('\n').filter((l) => l.trim().startsWith('-'))
+  content = content.replace(/引用来源:\s*([\s\S]*)$/i, (match: string, list: string) => {
+    const items = list.trim().split('\n').filter((line: string) => line.trim().startsWith('-'))
     if (items.length === 0) return match
 
     const cards = items
-      .map((item) => {
+      .map((item: string) => {
         const citeMatch = item.match(
           /\[cite:\s*(\d+)\]\s*(.*)\s*\(匹配度:\s*([\d.]+),\s*页码:\s*(\d+)\)/
         )
@@ -84,6 +84,16 @@ export function formatError(error: unknown): string {
 
   return String(error)
 }
+
+/**
+ * 检查是否为模型免费额度耗尽错误
+ */
+export function isFreeTierExhausted(error: any): boolean {
+  const errorMsg = typeof error === 'string' ? error : (error?.message || String(error))
+  return errorMsg.includes('free tier') && errorMsg.includes('exhausted')
+}
+
+export const FREE_TIER_EXHAUSTED_MSG = '当前免费额度已用完，请升级套餐后继续使用'
 
 /**
  * 创建上传任务 ID

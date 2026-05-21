@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { darkTheme, createDiscreteApi } from 'naive-ui'
-import { ref, onMounted } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import ChatOutput from './components/ChatOutput.vue'
 import AppHeader from './components/AppHeader.vue'
 import AppSidebar from './components/AppSidebar.vue'
@@ -26,33 +26,43 @@ const {
   isUploading,
   status,
   output,
+  conversations,
+  currentConversationId,
+  currentConversationTitle,
+  conversationMessages,
+  streamingAssistantMessageId,
+  isCurrentConversationStreaming,
+  knowledgeBaseStatus,
+  modelName,
   isChatStarted,
-  isConnecting,
-  isStreaming,
   currentAction,
   hasReceivedChunk,
-  hasContent,
   showPdfButton,
   isLoading,
   canSend,
   handleFileChange,
+  handleChatFileChange,
   handleRemoveFile,
+  createNewConversation,
+  switchConversation,
+  renameConversation,
+  deleteConversation,
+  clearCurrentConversation,
   startChat,
   clearFile,
   uploadSelectedFile,
-  removeFile,
   selectedVideoName,
-  videoPath,
+  selectedImageName,
   previewUrl,
-  isUploadingVideo,
-  videoUploadProgress
+  mediaType,
+  isUploadingVideo
 } = useAppLogic()
 
-const isVideoPreviewOpen = ref(false)
+void sidebarRef
+void audioRef
 
-function handleCitationClick() {
-  // 引用点击逻辑在 ChatOutput 中处理
-}
+const isVideoPreviewOpen = ref(false)
+const messagesEndRef = ref<HTMLElement | null>(null)
 
 const { message } = createDiscreteApi(['message'], {
   configProviderProps: {
@@ -60,17 +70,96 @@ const { message } = createDiscreteApi(['message'], {
   }
 })
 
+const videoPreviewSrc = computed(() => previewUrl.value ? `${API_BASE_URL}${previewUrl.value}` : undefined)
+
+function scrollToBottom() {
+  messagesEndRef.value?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+}
+
+watch(
+  conversationMessages,
+  async () => {
+    await nextTick()
+    scrollToBottom()
+  },
+  { deep: true, immediate: true },
+)
+
+watch(
+  () => currentConversationId.value,
+  async () => {
+    await nextTick()
+    scrollToBottom()
+  },
+)
+
+watch(
+  () => output.value,
+  async () => {
+    await nextTick()
+    scrollToBottom()
+  },
+)
+
+function handleVideoSeek(time: number) {
+  if (previewUrl.value) {
+    isVideoPreviewOpen.value = true
+    setTimeout(() => {
+      const video = document.querySelector('.video-preview-modal video') as HTMLVideoElement | null
+      if (video) {
+        video.currentTime = time
+        video.play()
+      }
+    }, 300)
+  }
+}
+
+function handleCitationClick() {
+  // 引用点击逻辑在 ChatOutput 中处理
+}
+
 function openVideoPreview() {
   if (previewUrl.value) {
-    console.log('Opening video preview with URL:', `${API_BASE_URL}${previewUrl.value}`)
     isVideoPreviewOpen.value = true
   }
 }
 
-function handleVideoError(e: any) {
-  const video = e.target as HTMLVideoElement
-  console.error('Video loading error:', video.error)
+function handleVideoError(event: Event) {
+  const video = event.target as HTMLVideoElement
   message.error(`视频加载失败: ${video.error?.message || '未知错误'}`)
+}
+
+function formatMessageTime(timestamp: number) {
+  return new Date(timestamp).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+function isAssistantMessageStreaming(messageId: string) {
+  return isCurrentConversationStreaming.value && streamingAssistantMessageId.value === messageId
+}
+
+function handleRenameConversation(conversationId: string) {
+  const conversation = conversations.value.find((item) => item.id === conversationId)
+  const currentTitle = conversation?.title || '新对话'
+  const nextTitle = window.prompt('请输入新的会话标题', currentTitle)
+
+  if (nextTitle === null) return
+  renameConversation(conversationId, nextTitle)
+}
+
+function handleRenameCurrentConversation() {
+  handleRenameConversation(currentConversationId.value)
+}
+
+function handleDeleteConversation(conversationId: string) {
+  const conversation = conversations.value.find((item) => item.id === conversationId)
+  if (!conversation) return
+
+  const confirmed = window.confirm(`确认删除会话“${conversation.title}”吗？`)
+  if (!confirmed) return
+  deleteConversation(conversationId)
 }
 </script>
 
@@ -78,8 +167,7 @@ function handleVideoError(e: any) {
   <n-config-provider :theme="darkTheme">
     <n-message-provider>
       <n-dialog-provider>
-        <div class="relative h-screen flex flex-col bg-[#05010d] text-white antialiased overflow-hidden">
-          <!-- Background elements -->
+        <div class="relative flex h-screen overflow-hidden bg-[#05010d] text-white antialiased">
           <div class="pointer-events-none absolute inset-0 z-0">
             <div class="absolute left-1/2 top-[-9rem] h-[24rem] w-[24rem] -translate-x-1/2 rounded-full bg-nebula-500/25 blur-[120px]" />
             <div class="absolute bottom-[-6rem] left-[-4rem] h-[20rem] w-[20rem] rounded-full bg-fuchsia-500/12 blur-[100px]" />
@@ -88,117 +176,169 @@ function handleVideoError(e: any) {
             <div class="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.04)_1px,transparent_1px)] bg-[size:72px_72px] opacity-10" />
           </div>
 
-          <n-layout position="absolute" style="background: transparent" has-sider>
-            <AppHeader :status="status" />
+          <n-layout has-sider position="absolute">
+            <AppSidebar
+              ref="sidebarRef"
+              :conversations="conversations"
+              :current-conversation-id="currentConversationId"
+              :uploaded-files="uploadedFiles"
+              :selected-file-name="selectedFileName"
+              :is-uploading="isUploading"
+              @create-conversation="createNewConversation"
+              @select-conversation="switchConversation"
+              @rename-conversation="handleRenameConversation"
+              @delete-conversation="handleDeleteConversation"
+              @file-change="handleFileChange"
+              @clear-selection="clearFile"
+              @upload="uploadSelectedFile"
+              @remove-file="handleRemoveFile"
+            />
 
-            <n-layout has-sider position="absolute" style="top: 64px; background: transparent">
-              <AppSidebar
-                ref="sidebarRef"
-                :uploaded-files="uploadedFiles"
-                :selected-file-name="selectedFileName"
-                :is-uploading="isUploading"
-                @file-change="handleFileChange"
-                @clear-selection="clearFile"
-                @upload="uploadSelectedFile"
-                @remove-file="handleRemoveFile"
-              />
+            <n-layout-content content-style="display: flex; flex-direction: column; height: 100%; background: transparent">
+              <div class="flex h-full min-h-0 flex-col gap-2 p-1 pl-0">
+                <AppHeader
+                  :conversation-title="currentConversationTitle"
+                  :ai-status="status"
+                  :model-name="modelName"
+                  :knowledge-base-status="knowledgeBaseStatus"
+                  :can-export="showPdfButton"
+                  :is-exporting="isExporting"
+                  @clear-conversation="clearCurrentConversation"
+                  @export="exportToPdf(exportContentRef)"
+                  @new-conversation="createNewConversation"
+                  @rename-current="handleRenameCurrentConversation"
+                />
 
-              <!-- Main Content -->
-              <n-layout-content content-style="display: flex; flex-direction: column; height: 100%; background: transparent">
-                <n-scrollbar class="flex-1">
-                  <div class="py-6 px-6">
-                    <div class="max-w-4xl mx-auto flex flex-col items-center min-h-full">
-                      <WelcomeView v-if="!hasContent && !isLoading" :lottie-url="ChatbitLottieUrl" />
+                <div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[5px] border border-white/8 bg-white/4 backdrop-blur-2xl shadow-[0_20px_50px_rgba(5,1,13,0.14)]">
+                  <n-scrollbar class="flex-1 box-border pb-100px">
+                    <div ref="exportContentRef" class="mx-auto flex min-h-full w-full max-w-5xl flex-col px-6 py-6">
+                      <WelcomeView v-if="conversationMessages.length === 0" :lottie-url="ChatbitLottieUrl" />
 
-                      <div v-else class="w-full relative">
-                        <div v-if="showPdfButton" class="absolute right-0 top-0 z-10">
-                          <n-button
-                            secondary
-                            round
-                            size="small"
-                            type="primary"
-                            :loading="isExporting"
-                            @click="exportToPdf(exportContentRef)"
-                            class="!bg-nebula-500/10 !border-nebula-500/30"
+                      <div v-else class="space-y-10">
+                        <div
+                          v-for="messageItem in conversationMessages"
+                          :key="messageItem.id"
+                          class="flex w-full"
+                          :class="messageItem.role === 'user' ? 'justify-end' : 'justify-start'"
+                        >
+                          <div
+                            class="flex w-full gap-4"
+                            :class="messageItem.role === 'user' ? 'max-w-3xl flex-row-reverse' : 'max-w-none'"
                           >
-                            <template #icon>
-                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                            </template>
-                            导出 PDF
-                          </n-button>
-                        </div>
-
-                        <div ref="exportContentRef" class="markdown-body text-base leading-7 text-white/84 pt-10">
-                           <n-space vertical size="large">
-                            <div v-if="isLoading && !hasContent" class="py-6">
-                              <n-space vertical size="medium">
-                                <n-skeleton text :repeat="2" />
-                                <n-skeleton text style="width: 60%" />
-                              </n-space>
+                            <div
+                              class="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-sm font-semibold"
+                              :class="messageItem.role === 'user'
+                                ? 'bg-white/10 text-white/80'
+                                : 'bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-[0_0_20px_rgba(168,85,247,0.35)]'"
+                            >
+                              {{ messageItem.role === 'user' ? '你' : 'AI' }}
                             </div>
 
-                            <ChatOutput :output="output" @citation-click="handleCitationClick" />
+                            <div
+                              class="min-w-0 flex-1 rounded-[28px] border px-5 py-4"
+                              :class="messageItem.role === 'user'
+                                ? 'border-violet-300/18 bg-gradient-to-br from-violet-500/16 to-fuchsia-500/12'
+                                : 'border-white/8 bg-black/12'"
+                            >
+                              <div class="mb-3 flex items-center justify-between gap-3 text-xs">
+                                <span class="font-medium text-white/70">
+                                  {{ messageItem.role === 'user' ? '你' : 'AI 助手' }}
+                                </span>
+                                <span class="text-white/35">{{ formatMessageTime(messageItem.createdAt) }}</span>
+                              </div>
 
-                            <div v-if="isStreaming" class="flex items-center gap-3 text-xs text-nebula-300/60 no-export">
-                              <span class="relative flex h-2 w-2">
-                                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-nebula-400 opacity-75"></span>
-                                <span class="relative inline-flex rounded-full h-2 w-2 bg-nebula-500"></span>
-                              </span>
-                              {{ currentAction || 'AI 正在输入...' }}
+                              <div v-if="messageItem.role === 'user'" class="whitespace-pre-wrap break-words text-[15px] leading-7 text-white/92">
+                                {{ messageItem.content }}
+                              </div>
+
+                              <div v-else class="min-w-0">
+                                <div v-if="messageItem.content.trim()" class="markdown-body text-base leading-7 text-white/88">
+                                  <ChatOutput
+                                    :output="messageItem.content"
+                                    :video-url="videoPreviewSrc"
+                                    @citation-click="handleCitationClick"
+                                    @video-seek="handleVideoSeek"
+                                  />
+                                </div>
+
+                                <div v-else-if="isAssistantMessageStreaming(messageItem.id)" class="py-4">
+                                  <n-space vertical size="medium">
+                                    <div class="flex items-center gap-3 text-sm text-nebula-200/70">
+                                      <span class="relative flex h-2.5 w-2.5">
+                                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-nebula-400 opacity-75"></span>
+                                        <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-nebula-500"></span>
+                                      </span>
+                                      {{ currentAction || 'AI 正在输入...' }}
+                                    </div>
+                                    <n-skeleton text :repeat="2" />
+                                    <n-skeleton text style="width: 55%" />
+                                  </n-space>
+                                </div>
+                              </div>
                             </div>
-                          </n-space>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </div>
-                </n-scrollbar>
 
-                <ChatInputArea
-                  v-model:query="query"
-                  v-model:isMuted="isMuted"
-                  :is-chat-started="isChatStarted"
-                  :is-uploading="isUploading || isUploadingVideo"
-                  :is-reading="isReading"
-                  :is-streaming="isStreaming"
-                  :can-send="canSend"
-                  :is-loading="isLoading"
-                  :has-received-chunk="hasReceivedChunk"
-                  :selected-file-name="selectedFileName"
-                  :selected-video-name="selectedVideoName"
-                  @send="startChat"
-                  @clear-file="clearFile"
-                  @preview-video="openVideoPreview"
-                />
-              </n-layout-content>
-            </n-layout>
+                      <div ref="messagesEndRef" />
+                    </div>
+                  </n-scrollbar>
+
+                  <ChatInputArea
+                    v-model:query="query"
+                    v-model:isMuted="isMuted"
+                    :is-chat-started="isChatStarted"
+                    :is-uploading="isUploading || isUploadingVideo"
+                    :is-reading="isReading"
+                    :is-streaming="isCurrentConversationStreaming"
+                    :can-send="canSend"
+                    :is-loading="isLoading"
+                    :has-received-chunk="hasReceivedChunk"
+                    :selected-file-name="selectedFileName"
+                    :selected-video-name="selectedVideoName"
+                    :selected-image-name="selectedImageName"
+                    @send="startChat"
+                    @clear-file="clearFile"
+                    @preview-video="openVideoPreview"
+                    @file-change="handleChatFileChange"
+                  />
+                </div>
+              </div>
+            </n-layout-content>
           </n-layout>
 
           <audio ref="audioRef" autoplay preload="none" class="hidden" />
 
-          <!-- Video Preview Modal -->
           <n-modal
             v-model:show="isVideoPreviewOpen"
             preset="card"
             style="width: 80vw; max-width: 1000px"
-            title="视频预览"
-            class="!bg-[#1a1625] !border-white/10"
+            :title="mediaType === 'image' ? '图片预览' : '视频预览'"
+            class="!border-white/10 !bg-[#1a1625] video-preview-modal"
           >
-            <div class="aspect-video bg-black rounded-lg overflow-hidden flex items-center justify-center">
-              <video 
-                  v-if="isVideoPreviewOpen"
+            <div class="aspect-video flex items-center justify-center overflow-hidden rounded-lg bg-black">
+              <template v-if="isVideoPreviewOpen">
+                <img
+                  v-if="mediaType === 'image'"
+                  :src="videoPreviewSrc"
+                  class="h-full w-full object-contain"
+                />
+                <video
+                  v-else
                   :key="previewUrl"
-                  controls 
+                  controls
                   autoplay
                   muted
                   playsinline
                   preload="auto"
                   crossorigin="anonymous"
-                  class="w-full h-full object-contain"
-                  :src="`${API_BASE_URL}${previewUrl}`"
+                  class="h-full w-full object-contain"
+                  :src="videoPreviewSrc"
                   @error="handleVideoError"
                 >
-                您的浏览器不支持视频预览。
-              </video>
+                  您的浏览器不支持视频预览。
+                </video>
+              </template>
             </div>
           </n-modal>
         </div>
@@ -208,9 +348,12 @@ function handleVideoError(e: any) {
 </template>
 
 <style scoped>
-/* App specific layout adjustments can go here if needed */
 :deep(.n-layout-scroll-container) {
   display: flex;
   flex-direction: column;
+}
+
+:deep(.n-layout) {
+  background: transparent;
 }
 </style>

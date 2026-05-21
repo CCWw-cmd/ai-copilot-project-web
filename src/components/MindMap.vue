@@ -70,7 +70,7 @@ const updateMarkmap = async () => {
   } else {
     mm = Markmap.create(svgRef.value, {
       autoFit: true,
-      padding: 20,
+      paddingX: 20,
     }, root)
   }
 }
@@ -92,7 +92,7 @@ const updateModalMarkmap = async () => {
   } else {
     modalMm = Markmap.create(modalSvgRef.value, {
       autoFit: true,
-      padding: 40,
+      paddingX: 40,
     }, root)
   }
 }
@@ -100,11 +100,6 @@ const updateModalMarkmap = async () => {
 const openModal = () => {
   isModalOpen.value = true
   updateModalMarkmap()
-}
-
-const closeModal = () => {
-  isModalOpen.value = false
-  modalMm = null
 }
 
 onMounted(() => {

@@ -1,6 +1,6 @@
 import { ref, onBeforeUnmount } from 'vue'
 import { API_BASE_URL } from './http'
-import { formatError, createUploadTaskId } from './utils'
+import { formatError, createUploadTaskId, isFreeTierExhausted, FREE_TIER_EXHAUSTED_MSG } from './utils'
 import { createDiscreteApi, darkTheme } from 'naive-ui'
 
 const { message: nMessage } = createDiscreteApi(['message'], {
@@ -10,6 +10,7 @@ const { message: nMessage } = createDiscreteApi(['message'], {
 })
 
 export function useRag() {
+  const selectedFile = ref<File | null>(null)
   const selectedFileName = ref('未选择文件')
   const uploadedFiles = ref<{ name: string; status: 'uploading' | 'success' | 'error' }[]>([])
   const isUploading = ref(false)
@@ -98,8 +99,26 @@ export function useRag() {
     }
   }
 
-  async function uploadSelectedFile(file: File | undefined) {
+  function selectFile(file: File | undefined) {
     if (!file) {
+      selectedFile.value = null
+      selectedFileName.value = '未选择文件'
+      return
+    }
+
+    selectedFile.value = file
+    selectedFileName.value = file.name
+  }
+
+  function clearSelectedFile() {
+    selectedFile.value = null
+    selectedFileName.value = '未选择文件'
+  }
+
+  async function uploadSelectedFile(file?: File) {
+    const targetFile = file ?? selectedFile.value
+
+    if (!targetFile) {
       nMessage.warning('请选择要上传的文件')
       return
     }
@@ -109,16 +128,16 @@ export function useRag() {
     currentUploadTaskId = createUploadTaskId()
     openUploadProgressStream(currentUploadTaskId)
 
-    const existingFileIndex = uploadedFiles.value.findIndex(f => f.name === file.name)
+    const existingFileIndex = uploadedFiles.value.findIndex(f => f.name === targetFile.name)
     if (existingFileIndex > -1) {
       uploadedFiles.value[existingFileIndex].status = 'uploading'
     } else {
-      uploadedFiles.value.push({ name: file.name, status: 'uploading' })
+      uploadedFiles.value.push({ name: targetFile.name, status: 'uploading' })
     }
 
     const formData = new FormData()
-    formData.append('file', file)
-    formData.append('fileName', selectedFileName.value)
+    formData.append('file', targetFile)
+    formData.append('fileName', targetFile.name)
     formData.append('taskId', currentUploadTaskId)
 
     try {
@@ -152,21 +171,29 @@ export function useRag() {
         xhr.send(formData)
       })
 
-      selectedFileName.value = '未选择文件'
+      clearSelectedFile()
 
       if (typeof result === 'string') {
         const displayMsg = result === '上传完成' ? '文件已上传' : result
         status.value = `状态：${displayMsg}`
-        setTimeout(() => { status.value = '状态：待机' }, 1000)
+        setTimeout(() => {
+          if (status.value === `状态：${displayMsg}`) {
+            status.value = '状态：待机'
+          }
+        }, 3000)
         isUploading.value = false
       } else {
         status.value = '状态：文件已上传，后台处理中...'
-        setTimeout(() => { status.value = '状态：待机' }, 1000)
       }
     } catch (error) {
-      status.value = '状态：文件上传失败'
-      output.value = `上传失败：${formatError(error)}`
-      const fileObj = uploadedFiles.value.find(f => f.name === file.name)
+      if (isFreeTierExhausted(error)) {
+        status.value = `状态：${FREE_TIER_EXHAUSTED_MSG}`
+        output.value = FREE_TIER_EXHAUSTED_MSG
+      } else {
+        status.value = '状态：文件上传失败'
+        output.value = `上传失败：${formatError(error)}`
+      }
+      const fileObj = uploadedFiles.value.find(f => f.name === targetFile.name)
       if (fileObj) fileObj.status = 'error'
       currentUploadTaskId = null
       closeRagProgressEventSource()
@@ -177,7 +204,7 @@ export function useRag() {
   function removeFile(fileName: string) {
     uploadedFiles.value = uploadedFiles.value.filter(f => f.name !== fileName)
     if (selectedFileName.value === fileName) {
-      selectedFileName.value = '未选择文件'
+      clearSelectedFile()
     }
   }
 
@@ -186,11 +213,14 @@ export function useRag() {
   })
 
   return {
+    selectedFile,
     selectedFileName,
     uploadedFiles,
     isUploading,
     status,
     output,
+    selectFile,
+    clearSelectedFile,
     uploadSelectedFile,
     removeFile,
     closeRagProgressEventSource

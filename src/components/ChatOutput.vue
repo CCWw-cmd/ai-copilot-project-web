@@ -28,6 +28,12 @@
               <MindMap v-if="segment.type === 'mindmap'" :code="segment.content" />
               <ChartRenderer v-else-if="segment.type === 'chart'" :code="segment.content" />
               <ReportRenderer v-else-if="segment.type === 'report'" :code="segment.content" />
+              <VideoTimestamp 
+                v-else-if="segment.type === 'timestamp' && videoUrl" 
+                :timestamp="segment.content" 
+                :video-url="videoUrl"
+                @seek="$emit('video-seek', $event)"
+              />
             </template>
           </template>
         </template>
@@ -41,20 +47,23 @@ import { computed } from 'vue'
 import MindMap from './MindMap.vue'
 import ChartRenderer from './ChartRenderer.vue'
 import ReportRenderer from './ReportRenderer.vue'
+import VideoTimestamp from './VideoTimestamp.vue'
 import { renderMarkdown } from '../lib/utils'
 
 const props = defineProps<{
   output: string
+  videoUrl?: string
 }>()
 
-defineEmits(['citation-click'])
+defineEmits(['citation-click', 'video-seek'])
 
 const messageSegments = computed(() => {
-  const segments: Array<{ type: 'markdown' | 'chart' | 'mindmap' | 'report', content: string, isGenerating?: boolean }> = []
+  const segments: Array<{ type: 'markdown' | 'chart' | 'mindmap' | 'report' | 'timestamp', content: string, isGenerating?: boolean }> = []
   let lastIndex = 0
   const fullText = props.output
   
-  const blockRegex = /```(chart|mindmap|report)\s*\n([\s\S]*?)\n```/gi
+  // 匹配代码块和时间戳
+  const blockRegex = /```(chart|mindmap|report)\s*\n([\s\S]*?)\n```|\[timestamp:\s*([\d:]+)\]/gi
   let match
   
   while ((match = blockRegex.exec(fullText)) !== null) {
@@ -65,11 +74,21 @@ const messageSegments = computed(() => {
       })
     }
     
-    segments.push({
-      type: match[1] as 'chart' | 'mindmap' | 'report',
-      content: match[2].trim(),
-      isGenerating: false
-    })
+    if (match[1]) {
+      // 是代码块 (chart/mindmap/report)
+      segments.push({
+        type: match[1] as 'chart' | 'mindmap' | 'report',
+        content: match[2].trim(),
+        isGenerating: false
+      })
+    } else if (match[3]) {
+      // 是时间戳
+      segments.push({
+        type: 'timestamp',
+        content: match[3],
+        isGenerating: false
+      })
+    }
     
     lastIndex = blockRegex.lastIndex
   }
@@ -103,7 +122,7 @@ const messageSegments = computed(() => {
 
 const groupedSegments = computed(() => {
   const segments = messageSegments.value
-  const groups: Array<{ type: 'markdown' | 'chart' | 'mindmap' | 'report' | 'combined', segments: any[] }> = []
+  const groups: Array<{ type: 'markdown' | 'chart' | 'mindmap' | 'report' | 'timestamp' | 'combined', segments: any[] }> = []
   
   for (let i = 0; i < segments.length; i++) {
     const current = segments[i]

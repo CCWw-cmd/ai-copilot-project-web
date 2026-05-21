@@ -21,6 +21,7 @@ declare module 'vue' {
     NCard: typeof import('naive-ui')['NCard']
     NConfigProvider: typeof import('naive-ui')['NConfigProvider']
     NDialogProvider: typeof import('naive-ui')['NDialogProvider']
+    NDropdown: typeof import('naive-ui')['NDropdown']
     NInput: typeof import('naive-ui')['NInput']
     NLayout: typeof import('naive-ui')['NLayout']
     NLayoutContent: typeof import('naive-ui')['NLayoutContent']
@@ -35,6 +36,7 @@ declare module 'vue' {
     NTag: typeof import('naive-ui')['NTag']
     NText: typeof import('naive-ui')['NText']
     ReportRenderer: typeof import('./src/components/ReportRenderer.vue')['default']
+    VideoTimestamp: typeof import('./src/components/VideoTimestamp.vue')['default']
     WelcomeView: typeof import('./src/components/WelcomeView.vue')['default']
   }
 }
