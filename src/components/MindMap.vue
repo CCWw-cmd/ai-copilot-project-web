@@ -3,35 +3,35 @@
     <div class="mindmap-container" @click="openModal">
       <svg ref="svgRef" class="w-full h-full min-h-[500px] cursor-zoom-in"></svg>
       <div class="absolute right-4 top-4 opacity-0 transition-opacity group-hover:opacity-100">
-        <button 
-          class="flex h-10 w-10 items-center justify-center rounded-xl border border-black/10 bg-black/5 text-gray-600 backdrop-blur-md transition hover:bg-black/10 hover:text-gray-900"
+        <n-button
+          secondary
+          circle
+          type="primary"
           title="查看大图"
           @click.stop="openModal"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
-        </button>
+          <template #icon>
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
+          </template>
+        </n-button>
       </div>
     </div>
 
     <!-- Modal -->
-    <Teleport to="body">
-      <div v-if="isModalOpen" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm" @click="closeModal">
-        <div class="relative h-[90vh] w-[90vw] overflow-hidden rounded-2xl border border-white/10 bg-white shadow-2xl" @click.stop>
-          <div class="flex items-center justify-between border-b border-black/5 px-6 py-4">
-            <h3 class="text-lg font-medium text-gray-900">脑图详情</h3>
-            <button 
-              class="flex h-10 w-10 items-center justify-center rounded-xl text-gray-400 transition hover:bg-black/5 hover:text-gray-600"
-              @click="closeModal"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-            </button>
-          </div>
-          <div class="h-[calc(90vh-68px)] w-full p-4">
-            <svg ref="modalSvgRef" class="h-full w-full"></svg>
-          </div>
-        </div>
+    <n-modal
+      v-model:show="isModalOpen"
+      preset="card"
+      style="width: 90vw; height: 90vh"
+      title="脑图详情"
+      :bordered="false"
+      class="!rounded-2xl shadow-2xl"
+      header-style="padding: 16px 24px; border-bottom: 1px solid rgba(255, 255, 255, 0.08)"
+      content-style="padding: 16px; flex: 1; overflow: hidden"
+    >
+      <div class="h-full w-full">
+        <svg ref="modalSvgRef" class="h-full w-full"></svg>
       </div>
-    </Teleport>
+    </n-modal>
   </div>
 </template>
 
@@ -114,6 +114,9 @@ onUnmounted(() => {
 .mindmap-wrapper {
   margin-top: 1.5rem;
   margin-bottom: 1.5rem;
+  width: 85%;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .mindmap-container {
@@ -140,6 +143,7 @@ onUnmounted(() => {
 
 :deep(.markmap-node circle) {
   fill: #fff;
+  stroke: #1f2937;
   stroke-width: 1.5px;
 }
 
@@ -151,7 +155,7 @@ onUnmounted(() => {
 
 :deep(.markmap-link) {
   fill: none;
-  stroke: rgba(0, 0, 0, 0.15);
+  stroke: #9ca3af; /* gray-400 */
   stroke-width: 1.5px;
 }
 </style>
