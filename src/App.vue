@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { darkTheme } from 'naive-ui'
+import { darkTheme, createDiscreteApi } from 'naive-ui'
+import { ref, onMounted } from 'vue'
 import ChatOutput from './components/ChatOutput.vue'
 import AppHeader from './components/AppHeader.vue'
 import AppSidebar from './components/AppSidebar.vue'
 import ChatInputArea from './components/ChatInputArea.vue'
 import WelcomeView from './components/WelcomeView.vue'
 import { useAppLogic } from './lib/useAppLogic'
+import { API_BASE_URL } from './lib/http'
 import './styles/markdown.css'
 
 const ChatbitLottieUrl = new URL('./assets/Chatbit.json', import.meta.url).href
@@ -30,6 +32,7 @@ const {
   currentAction,
   hasReceivedChunk,
   hasContent,
+  showPdfButton,
   isLoading,
   canSend,
   handleFileChange,
@@ -37,11 +40,37 @@ const {
   startChat,
   clearFile,
   uploadSelectedFile,
-  removeFile
+  removeFile,
+  selectedVideoName,
+  videoPath,
+  previewUrl,
+  isUploadingVideo,
+  videoUploadProgress
 } = useAppLogic()
+
+const isVideoPreviewOpen = ref(false)
 
 function handleCitationClick() {
   // 引用点击逻辑在 ChatOutput 中处理
+}
+
+const { message } = createDiscreteApi(['message'], {
+  configProviderProps: {
+    theme: darkTheme
+  }
+})
+
+function openVideoPreview() {
+  if (previewUrl.value) {
+    console.log('Opening video preview with URL:', `${API_BASE_URL}${previewUrl.value}`)
+    isVideoPreviewOpen.value = true
+  }
+}
+
+function handleVideoError(e: any) {
+  const video = e.target as HTMLVideoElement
+  console.error('Video loading error:', video.error)
+  message.error(`视频加载失败: ${video.error?.message || '未知错误'}`)
 }
 </script>
 
@@ -82,7 +111,7 @@ function handleCitationClick() {
                       <WelcomeView v-if="!hasContent && !isLoading" :lottie-url="ChatbitLottieUrl" />
 
                       <div v-else class="w-full relative">
-                        <div v-if="hasContent" class="absolute right-0 top-0 z-10">
+                        <div v-if="showPdfButton" class="absolute right-0 top-0 z-10">
                           <n-button
                             secondary
                             round
@@ -128,21 +157,50 @@ function handleCitationClick() {
                   v-model:query="query"
                   v-model:isMuted="isMuted"
                   :is-chat-started="isChatStarted"
-                  :is-uploading="isUploading"
+                  :is-uploading="isUploading || isUploadingVideo"
                   :is-reading="isReading"
                   :is-streaming="isStreaming"
                   :can-send="canSend"
                   :is-loading="isLoading"
                   :has-received-chunk="hasReceivedChunk"
                   :selected-file-name="selectedFileName"
+                  :selected-video-name="selectedVideoName"
                   @send="startChat"
                   @clear-file="clearFile"
+                  @preview-video="openVideoPreview"
                 />
               </n-layout-content>
             </n-layout>
           </n-layout>
 
           <audio ref="audioRef" autoplay preload="none" class="hidden" />
+
+          <!-- Video Preview Modal -->
+          <n-modal
+            v-model:show="isVideoPreviewOpen"
+            preset="card"
+            style="width: 80vw; max-width: 1000px"
+            title="视频预览"
+            class="!bg-[#1a1625] !border-white/10"
+          >
+            <div class="aspect-video bg-black rounded-lg overflow-hidden flex items-center justify-center">
+              <video 
+                  v-if="isVideoPreviewOpen"
+                  :key="previewUrl"
+                  controls 
+                  autoplay
+                  muted
+                  playsinline
+                  preload="auto"
+                  crossorigin="anonymous"
+                  class="w-full h-full object-contain"
+                  :src="`${API_BASE_URL}${previewUrl}`"
+                  @error="handleVideoError"
+                >
+                您的浏览器不支持视频预览。
+              </video>
+            </div>
+          </n-modal>
         </div>
       </n-dialog-provider>
     </n-message-provider>

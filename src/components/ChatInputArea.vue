@@ -39,10 +39,11 @@
               @keydown.ctrl.enter.prevent="$emit('send')"
             />
             <div
-              v-if="selectedFileName !== '未选择文件'"
-              class="absolute -top-14 left-0"
+              v-if="selectedFileName !== '未选择文件' || selectedVideoName !== '未选择视频'"
+              class="absolute -top-14 left-0 flex gap-2"
             >
               <n-tag
+                v-if="selectedFileName !== '未选择文件'"
                 closable
                 @close="$emit('clear-file')"
                 type="primary"
@@ -52,6 +53,19 @@
               >
                 <template #icon>📎</template>
                 {{ selectedFileName }}
+              </n-tag>
+              <n-tag
+                v-if="selectedVideoName !== '未选择视频'"
+                closable
+                @close="$emit('clear-file')"
+                @click="$emit('preview-video')"
+                type="success"
+                round
+                size="small"
+                class="!bg-emerald-500/20 !border-emerald-500/30 !text-emerald-200 backdrop-blur-md cursor-pointer hover:!bg-emerald-500/30 transition-colors"
+              >
+                <template #icon>🎬</template>
+                {{ selectedVideoName }}
               </n-tag>
             </div>
           </div>
@@ -86,7 +100,8 @@ defineProps<{
   isLoading: boolean
   hasReceivedChunk: boolean
   selectedFileName: string
+  selectedVideoName: string
 }>()
 
-defineEmits(['update:query', 'update:isMuted', 'send', 'clear-file'])
+defineEmits(['update:query', 'update:isMuted', 'send', 'clear-file', 'preview-video'])
 </script>

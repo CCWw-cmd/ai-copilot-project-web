@@ -18,7 +18,7 @@
               <n-space align="center" size="small">
                 <n-spin size="small" />
                 <n-text depth="3" class="text-xs">
-                  正在生成{{ segment.type === 'chart' ? '图表' : '脑图' }}...
+                  正在生成{{ segment.type === 'chart' ? '图表' : (segment.type === 'report' ? '巡检报告' : '脑图') }}...
                 </n-text>
               </n-space>
             </div>
@@ -27,6 +27,7 @@
             <template v-else>
               <MindMap v-if="segment.type === 'mindmap'" :code="segment.content" />
               <ChartRenderer v-else-if="segment.type === 'chart'" :code="segment.content" />
+              <ReportRenderer v-else-if="segment.type === 'report'" :code="segment.content" />
             </template>
           </template>
         </template>
@@ -39,6 +40,7 @@
 import { computed } from 'vue'
 import MindMap from './MindMap.vue'
 import ChartRenderer from './ChartRenderer.vue'
+import ReportRenderer from './ReportRenderer.vue'
 import { renderMarkdown } from '../lib/utils'
 
 const props = defineProps<{
@@ -48,11 +50,11 @@ const props = defineProps<{
 defineEmits(['citation-click'])
 
 const messageSegments = computed(() => {
-  const segments: Array<{ type: 'markdown' | 'chart' | 'mindmap', content: string, isGenerating?: boolean }> = []
+  const segments: Array<{ type: 'markdown' | 'chart' | 'mindmap' | 'report', content: string, isGenerating?: boolean }> = []
   let lastIndex = 0
   const fullText = props.output
   
-  const blockRegex = /```(chart|mindmap)\s*\n([\s\S]*?)\n```/gi
+  const blockRegex = /```(chart|mindmap|report)\s*\n([\s\S]*?)\n```/gi
   let match
   
   while ((match = blockRegex.exec(fullText)) !== null) {
@@ -64,7 +66,7 @@ const messageSegments = computed(() => {
     }
     
     segments.push({
-      type: match[1] as 'chart' | 'mindmap',
+      type: match[1] as 'chart' | 'mindmap' | 'report',
       content: match[2].trim(),
       isGenerating: false
     })
@@ -73,7 +75,7 @@ const messageSegments = computed(() => {
   }
   
   const remainingText = fullText.substring(lastIndex)
-  const incompleteMatch = remainingText.match(/```(chart|mindmap)\s*\n([\s\S]*)$/i)
+  const incompleteMatch = remainingText.match(/```(chart|mindmap|report)\s*\n([\s\S]*)$/i)
   
   if (incompleteMatch) {
     const startIndex = incompleteMatch.index!
@@ -85,7 +87,7 @@ const messageSegments = computed(() => {
     }
     
     segments.push({
-      type: incompleteMatch[1] as 'chart' | 'mindmap',
+      type: incompleteMatch[1] as 'chart' | 'mindmap' | 'report',
       content: incompleteMatch[2].trim(),
       isGenerating: true
     })
@@ -101,7 +103,7 @@ const messageSegments = computed(() => {
 
 const groupedSegments = computed(() => {
   const segments = messageSegments.value
-  const groups: Array<{ type: 'markdown' | 'chart' | 'mindmap' | 'combined', segments: any[] }> = []
+  const groups: Array<{ type: 'markdown' | 'chart' | 'mindmap' | 'report' | 'combined', segments: any[] }> = []
   
   for (let i = 0; i < segments.length; i++) {
     const current = segments[i]
@@ -114,7 +116,7 @@ const groupedSegments = computed(() => {
       
       const isTitle = /^#+\s+/.test(lastLine) || /^\d+\.\s+/.test(lastLine)
       
-      if (isTitle && (next.type === 'chart' || next.type === 'mindmap')) {
+      if (isTitle && (next.type === 'chart' || next.type === 'mindmap' || next.type === 'report')) {
         const otherContent = lines.slice(0, lines.length - 1).join('\n')
         
         if (otherContent.trim()) {

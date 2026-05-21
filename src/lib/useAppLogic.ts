@@ -4,6 +4,7 @@ import { usePdfExport } from './usePdfExport'
 import { useTts } from './useTts'
 import { useRag } from './useRag'
 import { useChat } from './useChat'
+import { useVideo } from './useVideo'
 
 export function useAppLogic() {
   const { message } = createDiscreteApi(['message'], {
@@ -83,9 +84,20 @@ export function useAppLogic() {
     closeEventSource 
   } = useChat()
 
+  const {
+    selectedVideoName,
+    videoPath,
+    previewUrl,
+    isUploading: isUploadingVideo,
+    uploadProgress: videoUploadProgress,
+    uploadVideo,
+    clearVideo
+  } = useVideo()
+
   // 综合状态管理
   const status = computed(() => {
     if (isUploading.value) return ragStatus.value
+    if (isUploadingVideo.value) return `状态：视频上传中 ${videoUploadProgress.value}%`
     return chatStatus.value
   })
 
@@ -99,29 +111,45 @@ export function useAppLogic() {
   })
 
   const hasContent = computed(() => output.value.trim().length > 0)
+  const isSystemError = computed(() => output.value.includes('【系统提示】'))
+  
+  const showPdfButton = computed(() => hasContent.value && !isSystemError.value)
+
   const isLoading = computed(
-    () => isConnecting.value || (isStreaming.value && !hasReceivedChunk.value),
+    () => isConnecting.value || (isStreaming.value && !hasReceivedChunk.value) || isUploadingVideo.value,
   )
   const canSend = computed(
-    () => !isUploading.value && !isStreaming.value && query.value.trim().length > 0,
+    () => !isUploading.value && !isStreaming.value && !isUploadingVideo.value && query.value.trim().length > 0,
   )
 
   function handleFileChange(event: Event) {
     const file = (event.target as HTMLInputElement).files?.[0]
-    selectedFileName.value = file?.name ?? '未选择文件'
+    if (file?.type.startsWith('video/')) {
+      uploadVideo(file)
+    } else {
+      selectedFileName.value = file?.name ?? '未选择文件'
+    }
   }
 
   function handleRemoveFile(fileName: string) {
-    removeFile(fileName)
-    if (selectedFileName.value === '未选择文件' && sidebarRef.value?.fileInput) {
+    if (fileName === selectedVideoName.value) {
+      clearVideo()
+    } else {
+      removeFile(fileName)
+    }
+    if (selectedFileName.value === '未选择文件' && selectedVideoName.value === '未选择视频' && sidebarRef.value?.fileInput) {
       sidebarRef.value.fileInput.value = ''
     }
   }
 
   async function handleUpload() {
     const file = sidebarRef.value?.fileInput?.files?.[0]
-    await uploadSelectedFile(file)
-    if (selectedFileName.value === '未选择文件' && sidebarRef.value?.fileInput) {
+    if (file?.type.startsWith('video/')) {
+      await uploadVideo(file)
+    } else {
+      await uploadSelectedFile(file)
+    }
+    if (selectedFileName.value === '未选择文件' && selectedVideoName.value === '未选择视频' && sidebarRef.value?.fileInput) {
       sidebarRef.value.fileInput.value = ''
     }
   }
@@ -130,15 +158,16 @@ export function useAppLogic() {
     const currentQuery = query.value.trim()
     if (!currentQuery) return
     
-    await startChatLogic(currentQuery, ttsSessionId, resetTtsPlayer, ensureTtsConnection)
+    await startChatLogic(currentQuery, ttsSessionId, resetTtsPlayer, ensureTtsConnection, videoPath.value)
     query.value = '' // 发送后清空输入框
   }
 
-  function clearFile() {
+  function clearAllFiles() {
     selectedFileName.value = '未选择文件'
     if (sidebarRef.value?.fileInput) {
       sidebarRef.value.fileInput.value = ''
     }
+    clearVideo()
   }
 
   watchEffect(() => {
@@ -186,14 +215,20 @@ export function useAppLogic() {
     currentAction,
     hasReceivedChunk,
     hasContent,
+    showPdfButton,
     isLoading,
     canSend,
     handleFileChange,
     handleRemoveFile,
     handleUpload,
     startChat,
-    clearFile,
+    clearFile: clearAllFiles,
     uploadSelectedFile,
-    removeFile
+    removeFile,
+    selectedVideoName,
+    videoPath,
+    previewUrl,
+    isUploadingVideo,
+    videoUploadProgress
   }
 }

@@ -27,4 +27,7 @@ export default defineConfig({
       resolvers: [NaiveUiResolver()]
     })
   ],
+  server:{
+    host: '0.0.0.0',
+  }
 })

@@ -93,9 +93,29 @@
 }
 
 .pdf-export-mode .chart-container,
-.pdf-export-mode .mindmap-container {
+.pdf-export-mode .mindmap-container,
+.pdf-export-mode .report-container {
   background-color: #ffffff !important;
   border: 1px solid rgba(0, 0, 0, 0.1) !important;
+}
+
+.pdf-export-mode .report-container .stat-card {
+  background-color: #f9fafb !important;
+  border: 1px solid rgba(0, 0, 0, 0.1) !important;
+}
+
+.pdf-export-mode .report-container .timeline {
+  border-left-color: rgba(0, 0, 0, 0.1) !important;
+}
+
+.pdf-export-mode .report-container .timeline-item div:first-child {
+  background-color: #000 !important;
+  box-shadow: none !important;
+}
+
+.pdf-export-mode .report-container .text-nebula-400 {
+  background-color: #f3f4f6 !important;
+  color: #000 !important;
 }
 
 .markdown-body table {

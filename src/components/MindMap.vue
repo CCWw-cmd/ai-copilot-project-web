@@ -52,8 +52,16 @@ let mm: Markmap | null = null
 let modalMm: Markmap | null = null
 const transformer = new Transformer()
 
-const updateMarkmap = () => {
+const updateMarkmap = async () => {
+  await nextTick()
   if (!svgRef.value) return
+  
+  // 确保 SVG 有确定的尺寸，防止 d3-zoom 相对长度解析错误
+  if (svgRef.value.clientWidth === 0 || svgRef.value.clientHeight === 0) {
+    svgRef.value.style.width = '100%'
+    svgRef.value.style.height = '100%'
+    svgRef.value.style.minHeight = '500px'
+  }
   
   const { root } = transformer.transform(props.code)
   if (mm) {
@@ -70,6 +78,12 @@ const updateMarkmap = () => {
 const updateModalMarkmap = async () => {
   await nextTick()
   if (!modalSvgRef.value) return
+  
+  // 确保 Modal 中的 SVG 也有尺寸
+  if (modalSvgRef.value.clientWidth === 0 || modalSvgRef.value.clientHeight === 0) {
+    modalSvgRef.value.style.width = '100%'
+    modalSvgRef.value.style.height = '100%'
+  }
   
   const { root } = transformer.transform(props.code)
   if (modalMm) {
