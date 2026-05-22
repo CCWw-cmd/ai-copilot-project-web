@@ -296,48 +296,50 @@ function handleDeleteConversation(conversationId: string) {
                                 <span class="text-white/35">{{ formatMessageTime(messageItem.createdAt) }}</span>
                               </div>
 
-                              <div v-if="messageItem.role === 'user'" class="whitespace-pre-wrap break-words text-[15px] leading-7 text-white/92">
-                                {{ messageItem.content }}
-                              </div>
+                              <template v-if="messageItem.role === 'user'">
+                                <div class="whitespace-pre-wrap break-words text-[15px] leading-7 text-white/92">
+                                  {{ messageItem.content }}
+                                </div>
 
-                              <div
-                                v-if="messageItem.role === 'user' && messageItem.mediaList?.length"
-                                class="mt-4 flex flex-wrap gap-3"
-                              >
                                 <div
-                                  v-for="(mediaItem, mediaIndex) in messageItem.mediaList"
-                                  :key="`${messageItem.id}_${mediaIndex}_${mediaItem.name}`"
-                                  class="w-[140px] h-[140px] overflow-hidden rounded-10px border border-white/10 bg-black/20"
+                                  v-if="messageItem.mediaList?.length"
+                                  class="mt-4 flex flex-wrap gap-3"
                                 >
-                                  <n-image
-                                    v-if="mediaItem.type === 'image'"
-                                    width="140"
-                                    height="140"
-                                    object-fit="cover"
-                                    :src="getMessageMediaSrc(mediaItem)"
-                                    :preview-src="getMessageMediaSrc(mediaItem)"
-                                    :img-props="{ alt: mediaItem.name, class: 'h-[140px] w-[140px] bg-black object-cover cursor-zoom-in' }"
-                                  />
-                                  <video
-                                    v-else
-                                    controls
-                                    preload="metadata"
-                                    playsinline
-                                    disablePictureInPicture
-                                    disableRemotePlayback
-                                    controlsList="nopictureinpicture"
-                                    crossorigin="anonymous"
-                                    class="h-[140px] w-[140px] cursor-zoom-in bg-black object-cover notranslate"
-                                    :src="getMessageMediaSrc(mediaItem)"
-                                    @click="previewMessageMedia(mediaItem)"
+                                  <div
+                                    v-for="(mediaItem, mediaIndex) in messageItem.mediaList"
+                                    :key="`${messageItem.id}_${mediaIndex}_${mediaItem.name}`"
+                                    class="w-[140px] h-[140px] overflow-hidden rounded-10px border border-white/10 bg-black/20"
                                   >
-                                    您的浏览器不支持视频播放。
-                                  </video>
-                                  <div class="border-t border-white/8 px-3 py-2 text-xs text-white/55">
-                                    {{ mediaItem.name }}
+                                    <n-image
+                                      v-if="mediaItem.type === 'image'"
+                                      width="140"
+                                      height="140"
+                                      object-fit="cover"
+                                      :src="getMessageMediaSrc(mediaItem)"
+                                      :preview-src="getMessageMediaSrc(mediaItem)"
+                                      :img-props="{ alt: mediaItem.name, class: 'h-[140px] w-[140px] bg-black object-cover cursor-zoom-in' }"
+                                    />
+                                    <video
+                                      v-else
+                                      controls
+                                      preload="metadata"
+                                      playsinline
+                                      disablePictureInPicture
+                                      disableRemotePlayback
+                                      controlsList="nopictureinpicture"
+                                      crossorigin="anonymous"
+                                      class="h-[140px] w-[140px] cursor-zoom-in bg-black object-cover notranslate"
+                                      :src="getMessageMediaSrc(mediaItem)"
+                                      @click="previewMessageMedia(mediaItem)"
+                                    >
+                                      您的浏览器不支持视频播放。
+                                    </video>
+                                    <div class="border-t border-white/8 px-3 py-2 text-xs text-white/55">
+                                      {{ mediaItem.name }}
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
+                              </template>
 
                               <div v-else class="min-w-0">
                                 <div v-if="messageItem.content.trim()" class="markdown-body text-base leading-7 text-white/88">
