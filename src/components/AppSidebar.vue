@@ -129,16 +129,16 @@
 
           <div v-else class="space-y-2">
             <div
-              v-for="file in uploadedFiles"
-              :key="file.name"
+              v-for="file in processedUploadedFiles"
+              :key="file.fullName || file.name"
               class="group flex items-center justify-between gap-3 rounded-5px border border-white/6 bg-black/10 px-3 py-3 transition-colors hover:border-white/12 hover:bg-white/6"
             >
-              <div class="min-w-0">
-                <div class="truncate text-sm text-white/88">{{ file.name }}</div>
+              <div class="min-w-0 flex-1">
+                <div class="truncate text-sm text-white/88" :title="file.displayName">{{ file.displayName }}</div>
                 <div class="mt-1 text-xs text-white/40">{{ renderFileStatus(file.status) }}</div>
               </div>
 
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-2 shrink-0">
                 <n-spin v-if="file.status === 'uploading'" :size="14" />
                 <span v-else-if="file.status === 'success'" class="text-xs font-semibold text-emerald-300">已完成</span>
                 <span v-else class="text-xs font-semibold text-rose-300">失败</span>
@@ -147,7 +147,7 @@
                     size="small"
                     quaternary
                     class="!text-white/65 hover:!bg-white/14 hover:!text-white"
-                    @click.stop="$emit('remove-file', file.name)"
+                    @click.stop="$emit('remove-file', file.fullName || file.name)"
                   >
                     <template #icon>
                       <span class="text-base">×</span>
@@ -163,12 +163,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 
-defineProps<{
+const props = defineProps<{
   conversations: Array<{ id: string; title: string; updatedAt: number }>
   currentConversationId: string
-  uploadedFiles: Array<{ name: string; status: string }>
+  uploadedFiles: Array<{ name: string; fullName?: string; status: string; createdAt?: number }>
   selectedFileName: string
   isUploading: boolean
 }>()
@@ -185,6 +185,31 @@ defineEmits([
 ])
 
 const fileInput = ref<HTMLInputElement | null>(null)
+
+// 处理重名显示逻辑
+const processedUploadedFiles = computed(() => {
+  const nameCountMap = new Map<string, number>()
+  props.uploadedFiles.forEach(file => {
+    nameCountMap.set(file.name, (nameCountMap.get(file.name) || 0) + 1)
+  })
+
+  return props.uploadedFiles.map(file => {
+    const isDuplicate = (nameCountMap.get(file.name) || 0) > 1
+    let displayName = file.name
+    
+    if (isDuplicate && file.createdAt) {
+      const date = new Date(file.createdAt)
+      const timeStr = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      const dateStr = date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+      displayName = `${file.name} (${dateStr} ${timeStr})`
+    }
+    
+    return {
+      ...file,
+      displayName
+    }
+  })
+})
 
 function formatUpdatedAt(timestamp: number) {
   const date = new Date(timestamp)

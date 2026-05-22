@@ -36,6 +36,7 @@ declare module 'vue' {
     NSpin: typeof import('naive-ui')['NSpin']
     NTag: typeof import('naive-ui')['NTag']
     NText: typeof import('naive-ui')['NText']
+    NTooltip: typeof import('naive-ui')['NTooltip']
     ReportRenderer: typeof import('./src/components/ReportRenderer.vue')['default']
     VideoTimestamp: typeof import('./src/components/VideoTimestamp.vue')['default']
     WelcomeView: typeof import('./src/components/WelcomeView.vue')['default']

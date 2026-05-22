@@ -417,8 +417,8 @@ export function useAppLogic() {
     input.value = ''
   }
 
-  function handleRemoveFile(fileName: string) {
-    removeFile(fileName)
+  async function handleRemoveFile(fileName: string) {
+    await removeFile(fileName)
     if (selectedFileName.value === '未选择文件' && mediaAttachments.value.length === 0 && sidebarRef.value?.fileInput) {
       sidebarRef.value.fileInput.value = ''
     }

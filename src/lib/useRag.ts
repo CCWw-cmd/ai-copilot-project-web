@@ -1,5 +1,5 @@
-import { ref, onBeforeUnmount } from 'vue'
-import { API_BASE_URL } from './http'
+import { ref, onBeforeUnmount, onMounted } from 'vue'
+import { API_BASE_URL, http } from './http'
 import { formatError, createUploadTaskId, isFreeTierExhausted, FREE_TIER_EXHAUSTED_MSG } from './utils'
 import { createDiscreteApi, darkTheme } from 'naive-ui'
 
@@ -12,13 +12,33 @@ const { message: nMessage } = createDiscreteApi(['message'], {
 export function useRag() {
   const selectedFile = ref<File | null>(null)
   const selectedFileName = ref('未选择文件')
-  const uploadedFiles = ref<{ name: string; status: 'uploading' | 'success' | 'error' }[]>([])
+  const uploadedFiles = ref<{ name: string; fullName?: string; status: 'uploading' | 'success' | 'error'; createdAt?: number }[]>([])
   const isUploading = ref(false)
   const status = ref('状态：待机')
   const output = ref('')
 
   let ragProgressEs: EventSource | null = null
   let currentUploadTaskId: string | null = null
+
+  async function fetchUploadedFiles() {
+    try {
+      const response = await http.get('/rag/files')
+      if (Array.isArray(response.data)) {
+        uploadedFiles.value = response.data.map((f: any) => ({
+          name: f.name,
+          fullName: f.fullName,
+          status: 'success',
+          createdAt: f.createdAt
+        }))
+      }
+    } catch (err) {
+      console.error('获取知识库文件列表失败:', err)
+    }
+  }
+
+  onMounted(() => {
+    fetchUploadedFiles()
+  })
 
   function closeRagProgressEventSource() {
     if (ragProgressEs) {
@@ -58,6 +78,7 @@ export function useRag() {
       closeRagProgressEventSource()
 
       if (progress.status === 'completed') {
+        fetchUploadedFiles() // 刷新列表以获取最新的 fullName 和状态
         setTimeout(() => {
           status.value = '状态：待机'
           output.value = ''
@@ -201,9 +222,20 @@ export function useRag() {
     }
   }
 
-  function removeFile(fileName: string) {
-    uploadedFiles.value = uploadedFiles.value.filter(f => f.name !== fileName)
-    if (selectedFileName.value === fileName) {
+  async function removeFile(identifier: string) {
+    const fileObj = uploadedFiles.value.find(f => (f.fullName || f.name) === identifier)
+    if (fileObj?.fullName) {
+      try {
+        await http.delete(`/rag/files/${encodeURIComponent(fileObj.fullName)}`)
+        nMessage.success('知识库文件已删除')
+      } catch (err) {
+        console.error('删除知识库文件失败:', err)
+        nMessage.error('删除知识库文件失败')
+      }
+    }
+    
+    uploadedFiles.value = uploadedFiles.value.filter(f => (f.fullName || f.name) !== identifier)
+    if (selectedFileName.value === identifier || (fileObj && selectedFileName.value === fileObj.name)) {
       clearSelectedFile()
     }
   }
