@@ -19,9 +19,7 @@
         class="group flex cursor-pointer items-center justify-center gap-3 rounded-[5px] border border-violet-300/25 bg-gradient-to-r from-violet-500 via-fuchsia-500 to-purple-500 px-4 py-2 text-sm font-semibold text-white shadow-[0_10px_30px_rgba(124,58,237,0.35)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_0_26px_rgba(168,85,247,0.65)] shrink-0 select-none"
         @click="$emit('create-conversation')"
       >
-        <svg class="h-4 w-4 transition-transform duration-300 group-hover:rotate-90" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
-        </svg>
+        <span class="text-lg font-bold transition-transform duration-300 group-hover:rotate-90">+</span>
         新建对话
       </div>
 
@@ -62,32 +60,25 @@
                   </div>
                 </div>
 
-                <div class="flex items-center gap-1 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+                <div class="flex items-center gap-2 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
                   <n-button
                     circle
-                    size="small"
                     quaternary
                     class="!bg-white/8 !text-white/70 hover:!bg-white/14 hover:!text-white"
                     @click.stop="$emit('rename-conversation', conversation.id)"
                   >
                     <template #icon>
-                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <path d="M4 20h4l10-10-4-4L4 16v4Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
-                        <path d="m12 6 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-                      </svg>
+                      <div class="text-16px i-ri:edit-line !text-white/80"></div>
                     </template>
                   </n-button>
                   <n-button
                     circle
-                    size="small"
                     quaternary
                     class="!bg-white/8 !text-white/70 hover:!bg-rose-500/18 hover:!text-rose-200"
                     @click.stop="$emit('delete-conversation', conversation.id)"
                   >
                     <template #icon>
-                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <path d="M5 7h14M9 7V5h6v2m-7 3v7m4-7v7m4-7v7M7 7l1 12h8l1-12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-                      </svg>
+                      <div class="text-16px i-ri:delete-bin-6-line !text-white/80"></div>
                     </template>
                   </n-button>
                 </div>
@@ -105,9 +96,7 @@
           </div>
           <n-button quaternary circle size="small" @click="fileInput?.click()">
             <template #icon>
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
-              </svg>
+              <span class="text-lg font-bold">+</span>
             </template>
           </n-button>
         </div>
@@ -154,18 +143,16 @@
                 <span v-else-if="file.status === 'success'" class="text-xs font-semibold text-emerald-300">已完成</span>
                 <span v-else class="text-xs font-semibold text-rose-300">失败</span>
                 <n-button
-                  circle
-                  size="small"
-                  quaternary
-                  class="!text-white/65 hover:!bg-white/14 hover:!text-white"
-                  @click.stop="$emit('remove-file', file.name)"
-                >
-                  <template #icon>
-                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                      <path d="m6 6 12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-                    </svg>
-                  </template>
-                </n-button>
+                    circle
+                    size="small"
+                    quaternary
+                    class="!text-white/65 hover:!bg-white/14 hover:!text-white"
+                    @click.stop="$emit('remove-file', file.name)"
+                  >
+                    <template #icon>
+                      <span class="text-base">×</span>
+                    </template>
+                  </n-button>
               </div>
             </div>
           </div>

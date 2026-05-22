@@ -28,9 +28,7 @@
         <n-dropdown trigger="click" :options="moreOptions" @select="handleSelect">
           <n-button quaternary circle class="!rounded-xl">
             <template #icon>
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M6 12h.01M12 12h.01M18 12h.01" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
-              </svg>
+              <span class="text-lg font-bold">⋮</span>
             </template>
           </n-button>
         </n-dropdown>

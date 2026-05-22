@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { API_BASE_URL } from './http'
 import { isFreeTierExhausted, FREE_TIER_EXHAUSTED_MSG } from './utils'
 import { createDiscreteApi, darkTheme } from 'naive-ui'
@@ -10,13 +10,29 @@ const { message: nMessage } = createDiscreteApi(['message'], {
 })
 
 export function useVideo() {
-  const selectedVideoName = ref('未选择视频')
-  const selectedImageName = ref('未选择图片')
-  const mediaPath = ref('')
-  const previewUrl = ref('')
-  const mediaType = ref<'image' | 'video' | null>(null)
+  const mediaAttachments = ref<Array<{
+    id: string
+    type: 'image' | 'video'
+    name: string
+    filePath: string
+    previewUrl: string
+  }>>([])
   const isUploading = ref(false)
   const uploadProgress = ref(0)
+
+  const selectedVideoName = computed(() => {
+    const latestVideo = [...mediaAttachments.value].reverse().find((item) => item.type === 'video')
+    return latestVideo?.name ?? '未选择视频'
+  })
+
+  const selectedImageName = computed(() => {
+    const latestImage = [...mediaAttachments.value].reverse().find((item) => item.type === 'image')
+    return latestImage?.name ?? '未选择图片'
+  })
+
+  const mediaPath = computed(() => mediaAttachments.value[0]?.filePath ?? '')
+  const previewUrl = computed(() => mediaAttachments.value[0]?.previewUrl ?? '')
+  const mediaType = computed<'image' | 'video' | null>(() => mediaAttachments.value[0]?.type ?? null)
 
   async function uploadMedia(file: File) {
     if (!file) return
@@ -25,16 +41,6 @@ export function useVideo() {
     uploadProgress.value = 0
     
     const isImage = file.type.startsWith('image/')
-    if (isImage) {
-      selectedImageName.value = file.name
-      selectedVideoName.value = '未选择视频'
-      mediaType.value = 'image'
-    } else {
-      selectedVideoName.value = file.name
-      selectedImageName.value = '未选择图片'
-      mediaType.value = 'video'
-    }
-
     const formData = new FormData()
     formData.append('file', file)
 
@@ -63,8 +69,13 @@ export function useVideo() {
       })
 
       const data = result as any
-      mediaPath.value = data.filePath
-      previewUrl.value = data.previewUrl
+      mediaAttachments.value.push({
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        type: isImage ? 'image' : 'video',
+        name: file.name,
+        filePath: data.filePath,
+        previewUrl: data.previewUrl
+      })
       nMessage.success(isImage ? '图片上传成功' : '视频上传成功')
     } catch (error) {
       console.error('Media upload error:', error)
@@ -73,24 +84,22 @@ export function useVideo() {
       } else {
         nMessage.error(isImage ? '图片上传失败' : '视频上传失败')
       }
-      selectedVideoName.value = '未选择视频'
-      selectedImageName.value = '未选择图片'
-      mediaType.value = null
     } finally {
       isUploading.value = false
     }
   }
 
+  function removeMedia(mediaId: string) {
+    mediaAttachments.value = mediaAttachments.value.filter((item) => item.id !== mediaId)
+  }
+
   function clearMedia() {
-    selectedVideoName.value = '未选择视频'
-    selectedImageName.value = '未选择图片'
-    mediaPath.value = ''
-    previewUrl.value = ''
+    mediaAttachments.value = []
     uploadProgress.value = 0
-    mediaType.value = null
   }
 
   return {
+    mediaAttachments,
     selectedVideoName,
     selectedImageName,
     mediaPath,
@@ -99,6 +108,7 @@ export function useVideo() {
     isUploading,
     uploadProgress,
     uploadMedia,
+    removeMedia,
     clearMedia
   }
 }

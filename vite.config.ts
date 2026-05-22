@@ -4,6 +4,7 @@ import UnoCSS from '@unocss/vite'
 import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
 import { NaiveUiResolver } from 'unplugin-vue-components/resolvers'
+import { codeInspectorPlugin } from 'code-inspector-plugin';
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -25,7 +26,10 @@ export default defineConfig({
     }),
     Components({
       resolvers: [NaiveUiResolver()]
-    })
+    }),
+    codeInspectorPlugin({
+      bundler: 'vite',
+    }),
   ],
   server:{
     host: '0.0.0.0',

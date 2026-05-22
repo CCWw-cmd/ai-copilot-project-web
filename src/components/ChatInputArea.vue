@@ -26,12 +26,8 @@
         class="!rounded-[28px] !border-white/8 !bg-#25222C shadow-[0_20px_50px_rgba(5,1,13,0.18)] backdrop-blur-2xl transition-all duration-300 focus-within:!border-nebula-500/60 focus-within:!shadow-[0_0_0_3px_rgba(139,92,246,0.16)]"
         content-style="padding: 10px"
       >
-        <div
-          v-if="selectedFileName !== '未选择文件' || selectedVideoName !== '未选择视频' || selectedImageName !== '未选择图片'"
-          class="mb-3 flex flex-wrap gap-2"
-        >
+        <div v-if="selectedFileName !== '未选择文件'" class="mb-3 flex flex-wrap gap-2">
           <n-tag
-            v-if="selectedFileName !== '未选择文件'"
             closable
             type="primary"
             round
@@ -42,53 +38,60 @@
             <template #icon>📎</template>
             {{ selectedFileName }}
           </n-tag>
-          <n-tag
-            v-if="selectedImageName !== '未选择图片'"
-            closable
-            type="warning"
-            round
-            size="small"
-            class="!border-amber-500/30 !bg-amber-500/20 !text-amber-200 backdrop-blur-md cursor-pointer hover:!bg-amber-500/30 transition-colors"
-            @close="$emit('clear-file')"
-            @click="$emit('preview-video')"
+        </div>
+
+        <div v-if="mediaAttachments.length > 0" class="mb-3 flex flex-wrap gap-3 px-2">
+          <div
+            v-for="mediaItem in mediaAttachments"
+            :key="mediaItem.id"
+            class="group relative h-15 w-15 shrink-0 overflow-hidden"
           >
-            <template #icon>🖼️</template>
-            {{ selectedImageName }}
-          </n-tag>
-          <n-tag
-            v-if="selectedVideoName !== '未选择视频'"
-            closable
-            type="success"
-            round
-            size="small"
-            class="!border-emerald-500/30 !bg-emerald-500/20 !text-emerald-200 backdrop-blur-md cursor-pointer hover:!bg-emerald-500/30 transition-colors"
-            @close="$emit('clear-file')"
-            @click="$emit('preview-video')"
-          >
-            <template #icon>🎬</template>
-            {{ selectedVideoName }}
-          </n-tag>
+            <div
+              class="absolute inset-0 z-0 cursor-pointer"
+              @click="$emit('preview-media', mediaItem)"
+            >
+              <img
+                :src="mediaItem.previewSrc"
+                :alt="mediaItem.name"
+                class="h-full w-full object-cover notranslate"
+              />
+              <div
+                v-if="mediaItem.type === 'video'"
+                class="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/25 backdrop-blur-[1px]"
+              >
+                <div class="flex h-7 w-7 items-center justify-center rounded-full bg-white/20 text-xs text-white shadow-lg ring-1 ring-white/40">
+                  ▶
+                </div>
+              </div>
+            </div>
+
+            <div
+              class="absolute right-2px top-2px z-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-xs text-white transition-colors hover:bg-black/85"
+              @click.stop="$emit('remove-media', mediaItem.id)"
+            >
+              ×
+            </div>
+          </div>
         </div>
 
         <div class="flex items-center gap-3">
           <div class="pl-2">
-            <n-button
-              circle
-              quaternary
-              class="!text-white/40 hover:!text-white hover:!bg-white/10"
-              @click="chatFileInput?.click()"
-            >
-              <template #icon>
-                <svg viewBox="0 0 24 24" fill="none" class="h-5 w-5">
-                  <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
-                </svg>
-              </template>
-            </n-button>
+              <n-button
+                circle
+                quaternary
+                class="!text-white/40 hover:!text-white hover:!bg-white/10"
+                @click="chatFileInput?.click()"
+              >
+                <template #icon>
+                  <div class="i-iconoir:attachment" />
+                </template>
+              </n-button>
             <input
               ref="chatFileInput"
               type="file"
               class="hidden"
               accept="image/*,video/*"
+              multiple
               @change="$emit('file-change', $event)"
             />
           </div>
@@ -139,11 +142,15 @@ defineProps<{
   isLoading: boolean
   hasReceivedChunk: boolean
   selectedFileName: string
-  selectedVideoName: string
-  selectedImageName: string
+  mediaAttachments: Array<{
+    id: string
+    type: 'image' | 'video'
+    name: string
+    previewSrc: string
+  }>
 }>()
 
-defineEmits(['update:query', 'update:isMuted', 'send', 'clear-file', 'preview-video', 'file-change'])
+defineEmits(['update:query', 'update:isMuted', 'send', 'clear-file', 'preview-media', 'remove-media', 'file-change'])
 
 const chatFileInput = ref<HTMLInputElement | null>(null)
 </script>

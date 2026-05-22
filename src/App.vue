@@ -12,6 +12,18 @@ import './styles/markdown.css'
 
 const ChatbitLottieUrl = new URL('./assets/Chatbit.json', import.meta.url).href
 
+type MediaPreviewPayload = {
+  type: 'image' | 'video'
+  src: string
+  name?: string
+}
+
+type MessageMediaItem = {
+  type: 'image' | 'video'
+  name: string
+  previewUrl: string
+}
+
 const {
   query,
   exportContentRef,
@@ -43,6 +55,7 @@ const {
   handleFileChange,
   handleChatFileChange,
   handleRemoveFile,
+  handleRemoveMedia,
   createNewConversation,
   switchConversation,
   renameConversation,
@@ -51,10 +64,7 @@ const {
   startChat,
   clearFile,
   uploadSelectedFile,
-  selectedVideoName,
-  selectedImageName,
-  previewUrl,
-  mediaType,
+  mediaAttachments,
   isUploadingVideo
 } = useAppLogic()
 
@@ -63,6 +73,7 @@ void audioRef
 
 const isVideoPreviewOpen = ref(false)
 const messagesEndRef = ref<HTMLElement | null>(null)
+const activeMediaPreview = ref<MediaPreviewPayload | null>(null)
 
 const { message } = createDiscreteApi(['message'], {
   configProviderProps: {
@@ -70,7 +81,17 @@ const { message } = createDiscreteApi(['message'], {
   }
 })
 
-const videoPreviewSrc = computed(() => previewUrl.value ? `${API_BASE_URL}${previewUrl.value}` : undefined)
+const composerMediaList = computed(() =>
+  mediaAttachments.value.map((item) => ({
+    ...item,
+    previewSrc: `${API_BASE_URL}${item.previewUrl}`
+  })),
+)
+
+function resolveMediaSrc(mediaPreviewUrl?: string) {
+  if (!mediaPreviewUrl) return undefined
+  return `${API_BASE_URL}${mediaPreviewUrl}`
+}
 
 function scrollToBottom() {
   messagesEndRef.value?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -101,27 +122,37 @@ watch(
   },
 )
 
-function handleVideoSeek(time: number) {
-  if (previewUrl.value) {
-    isVideoPreviewOpen.value = true
-    setTimeout(() => {
-      const video = document.querySelector('.video-preview-modal video') as HTMLVideoElement | null
-      if (video) {
-        video.currentTime = time
-        video.play()
-      }
-    }, 300)
+function openMediaPreview(payload: any) {
+  activeMediaPreview.value = {
+    type: payload.type,
+    src: payload.src || payload.previewSrc,
+    name: payload.name
   }
+  isVideoPreviewOpen.value = true
+}
+
+function handleVideoSeek(messageItem: { mediaList?: MessageMediaItem[] }, time: number) {
+  const videoMedia = getPrimaryVideoMedia(messageItem)
+  const src = videoMedia ? resolveMediaSrc(videoMedia.previewUrl) : undefined
+  if (!src) return
+
+  openMediaPreview({
+    type: 'video',
+    src,
+    name: videoMedia?.name
+  })
+
+  setTimeout(() => {
+    const video = document.querySelector('.video-preview-modal video') as HTMLVideoElement | null
+    if (video) {
+      video.currentTime = time
+      video.play().catch(() => undefined)
+    }
+  }, 300)
 }
 
 function handleCitationClick() {
   // 引用点击逻辑在 ChatOutput 中处理
-}
-
-function openVideoPreview() {
-  if (previewUrl.value) {
-    isVideoPreviewOpen.value = true
-  }
 }
 
 function handleVideoError(event: Event) {
@@ -138,6 +169,24 @@ function formatMessageTime(timestamp: number) {
 
 function isAssistantMessageStreaming(messageId: string) {
   return isCurrentConversationStreaming.value && streamingAssistantMessageId.value === messageId
+}
+
+function getPrimaryVideoMedia(messageItem: { mediaList?: MessageMediaItem[] }) {
+  return messageItem.mediaList?.find((item) => item.type === 'video')
+}
+
+function getMessageMediaSrc(mediaItem?: MessageMediaItem) {
+  return resolveMediaSrc(mediaItem?.previewUrl)
+}
+
+function previewMessageMedia(mediaItem?: MessageMediaItem) {
+  const src = getMessageMediaSrc(mediaItem)
+  if (!src || !mediaItem) return
+  openMediaPreview({
+    type: mediaItem.type,
+    src,
+    name: mediaItem.name
+  })
 }
 
 function handleRenameConversation(conversationId: string) {
@@ -251,13 +300,52 @@ function handleDeleteConversation(conversationId: string) {
                                 {{ messageItem.content }}
                               </div>
 
+                              <div
+                                v-if="messageItem.role === 'user' && messageItem.mediaList?.length"
+                                class="mt-4 flex flex-wrap gap-3"
+                              >
+                                <div
+                                  v-for="(mediaItem, mediaIndex) in messageItem.mediaList"
+                                  :key="`${messageItem.id}_${mediaIndex}_${mediaItem.name}`"
+                                  class="w-[140px] h-[140px] overflow-hidden rounded-10px border border-white/10 bg-black/20"
+                                >
+                                  <n-image
+                                    v-if="mediaItem.type === 'image'"
+                                    width="140"
+                                    height="140"
+                                    object-fit="cover"
+                                    :src="getMessageMediaSrc(mediaItem)"
+                                    :preview-src="getMessageMediaSrc(mediaItem)"
+                                    :img-props="{ alt: mediaItem.name, class: 'h-[140px] w-[140px] bg-black object-cover cursor-zoom-in' }"
+                                  />
+                                  <video
+                                    v-else
+                                    controls
+                                    preload="metadata"
+                                    playsinline
+                                    disablePictureInPicture
+                                    disableRemotePlayback
+                                    controlsList="nopictureinpicture"
+                                    crossorigin="anonymous"
+                                    class="h-[140px] w-[140px] cursor-zoom-in bg-black object-cover notranslate"
+                                    :src="getMessageMediaSrc(mediaItem)"
+                                    @click="previewMessageMedia(mediaItem)"
+                                  >
+                                    您的浏览器不支持视频播放。
+                                  </video>
+                                  <div class="border-t border-white/8 px-3 py-2 text-xs text-white/55">
+                                    {{ mediaItem.name }}
+                                  </div>
+                                </div>
+                              </div>
+
                               <div v-else class="min-w-0">
                                 <div v-if="messageItem.content.trim()" class="markdown-body text-base leading-7 text-white/88">
                                   <ChatOutput
                                     :output="messageItem.content"
-                                    :video-url="videoPreviewSrc"
+                                    :video-url="getMessageMediaSrc(getPrimaryVideoMedia(messageItem))"
                                     @citation-click="handleCitationClick"
-                                    @video-seek="handleVideoSeek"
+                                    @video-seek="handleVideoSeek(messageItem, $event)"
                                   />
                                 </div>
 
@@ -295,11 +383,11 @@ function handleDeleteConversation(conversationId: string) {
                     :is-loading="isLoading"
                     :has-received-chunk="hasReceivedChunk"
                     :selected-file-name="selectedFileName"
-                    :selected-video-name="selectedVideoName"
-                    :selected-image-name="selectedImageName"
+                    :media-attachments="composerMediaList"
                     @send="startChat"
                     @clear-file="clearFile"
-                    @preview-video="openVideoPreview"
+                    @preview-media="openMediaPreview"
+                    @remove-media="handleRemoveMedia"
                     @file-change="handleChatFileChange"
                   />
                 </div>
@@ -313,27 +401,33 @@ function handleDeleteConversation(conversationId: string) {
             v-model:show="isVideoPreviewOpen"
             preset="card"
             style="width: 80vw; max-width: 1000px"
-            :title="mediaType === 'image' ? '图片预览' : '视频预览'"
+            :title="activeMediaPreview?.type === 'image' ? '图片预览' : '视频预览'"
             class="!border-white/10 !bg-[#1a1625] video-preview-modal"
           >
             <div class="aspect-video flex items-center justify-center overflow-hidden rounded-lg bg-black">
               <template v-if="isVideoPreviewOpen">
-                <img
-                  v-if="mediaType === 'image'"
-                  :src="videoPreviewSrc"
-                  class="h-full w-full object-contain"
+                <n-image
+                  v-if="activeMediaPreview?.type === 'image'"
+                  width="100%"
+                  object-fit="contain"
+                  :src="activeMediaPreview?.src"
+                  :preview-src="activeMediaPreview?.src"
+                  :img-props="{ class: 'h-full w-full object-contain' }"
                 />
                 <video
                   v-else
-                  :key="previewUrl"
+                  :key="activeMediaPreview?.src"
                   controls
                   autoplay
                   muted
                   playsinline
+                  disablePictureInPicture
+                  disableRemotePlayback
+                  controlsList="nopictureinpicture"
                   preload="auto"
                   crossorigin="anonymous"
-                  class="h-full w-full object-contain"
-                  :src="videoPreviewSrc"
+                  class="h-full w-full object-contain notranslate"
+                  :src="activeMediaPreview?.src"
                   @error="handleVideoError"
                 >
                   您的浏览器不支持视频预览。

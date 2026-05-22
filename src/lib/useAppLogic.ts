@@ -5,14 +5,23 @@ import { useTts } from './useTts'
 import { useRag } from './useRag'
 import { useChat } from './useChat'
 import { useVideo } from './useVideo'
+import { http } from './http'
 
 type ChatRole = 'user' | 'assistant'
+
+interface ChatMediaAttachment {
+  type: 'image' | 'video'
+  name: string
+  filePath: string
+  previewUrl: string
+}
 
 interface ChatMessage {
   id: string
   role: ChatRole
   content: string
   createdAt: number
+  mediaList?: ChatMediaAttachment[]
 }
 
 interface Conversation {
@@ -39,6 +48,33 @@ function createConversation(title = UNTITLED_CONVERSATION): Conversation {
   }
 }
 
+function normalizeMediaAttachment(raw: unknown): ChatMediaAttachment | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+
+  const candidate = raw as Partial<ChatMediaAttachment>
+  if (candidate.type !== 'image' && candidate.type !== 'video') return undefined
+  if (typeof candidate.name !== 'string' || !candidate.name.trim()) return undefined
+  if (typeof candidate.filePath !== 'string') return undefined
+  if (typeof candidate.previewUrl !== 'string' || !candidate.previewUrl.trim()) return undefined
+
+  return {
+    type: candidate.type,
+    name: candidate.name.trim(),
+    filePath: candidate.filePath,
+    previewUrl: candidate.previewUrl.trim()
+  }
+}
+
+function normalizeMediaAttachments(raw: unknown): ChatMediaAttachment[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+
+  const items = raw
+    .map((item) => normalizeMediaAttachment(item))
+    .filter((item): item is ChatMediaAttachment => Boolean(item))
+
+  return items.length > 0 ? items : undefined
+}
+
 function normalizeConversation(raw: unknown): Conversation | null {
   if (!raw || typeof raw !== 'object') return null
 
@@ -54,7 +90,9 @@ function normalizeConversation(raw: unknown): Conversation | null {
           id: typeof msg.id === 'string' ? msg.id : createId('message'),
           role: msg.role === 'user' ? 'user' : 'assistant',
           content: typeof msg.content === 'string' ? msg.content : '',
-          createdAt: typeof msg.createdAt === 'number' ? msg.createdAt : Date.now()
+          createdAt: typeof msg.createdAt === 'number' ? msg.createdAt : Date.now(),
+          mediaList: normalizeMediaAttachments((msg as any).mediaList)
+            ?? (normalizeMediaAttachment((msg as any).media) ? [normalizeMediaAttachment((msg as any).media)!] : undefined)
         } satisfies ChatMessage
       })
     : []
@@ -115,6 +153,22 @@ export function useAppLogic() {
   const currentConversationId = ref(conversations.value[0]?.id ?? createConversation().id)
   const streamingConversationId = ref('')
   const streamingAssistantMessageId = ref('')
+  const modelName = ref(DEFAULT_MODEL_NAME)
+
+  const fetchModelName = async () => {
+    try {
+      const res = await http.get('/ai/model')
+      if (res.data && res.data.model) {
+        modelName.value = res.data.model
+      }
+    } catch (err) {
+      console.error('获取模型名称失败:', err)
+    }
+  }
+
+  onMounted(() => {
+    fetchModelName()
+  })
 
   // 使用组合式函数提取逻辑
   const { isExporting, exportToPdf } = usePdfExport()
@@ -179,6 +233,7 @@ export function useAppLogic() {
   } = useChat()
 
   const {
+    mediaAttachments,
     selectedVideoName,
     selectedImageName,
     mediaPath: videoPath,
@@ -187,6 +242,7 @@ export function useAppLogic() {
     isUploading: isUploadingVideo,
     uploadProgress: videoUploadProgress,
     uploadMedia,
+    removeMedia,
     clearMedia: clearVideo
   } = useVideo()
 
@@ -230,8 +286,7 @@ export function useAppLogic() {
   const knowledgeBaseStatus = computed(() => {
     if (isUploading.value) return '知识库处理中'
     if (selectedFileName.value !== '未选择文件') return '待上传文档'
-    if (selectedVideoName.value !== '未选择视频') return '已关联视频'
-    if (selectedImageName.value !== '未选择图片') return '已关联图片'
+    if (mediaAttachments.value.length > 0) return `已关联 ${mediaAttachments.value.length} 个媒体文件`
     if (uploadedFiles.value.length === 0) return '未加载知识库'
     return `已加载 ${uploadedFiles.value.length} 份文档`
   })
@@ -345,29 +400,41 @@ export function useAppLogic() {
     input.value = ''
   }
 
-  function handleChatFileChange(event: Event) {
+  async function handleChatFileChange(event: Event) {
     const input = event.target as HTMLInputElement
-    const file = input.files?.[0]
-    if (!file) return
+    const files = Array.from(input.files ?? [])
+    if (files.length === 0) return
 
-    if (file.type.startsWith('video/') || file.type.startsWith('image/')) {
-      uploadMedia(file)
-    } else {
+    const validFiles = files.filter((file) => file.type.startsWith('video/') || file.type.startsWith('image/'))
+    if (validFiles.length !== files.length) {
       message.warning('聊天仅支持图片和视频上传')
+    }
+
+    for (const file of validFiles) {
+      await uploadMedia(file)
     }
 
     input.value = ''
   }
 
   function handleRemoveFile(fileName: string) {
-    if (fileName === selectedVideoName.value || fileName === selectedImageName.value) {
-      clearVideo()
-    } else {
-      removeFile(fileName)
-    }
-    if (selectedFileName.value === '未选择文件' && selectedVideoName.value === '未选择视频' && selectedImageName.value === '未选择图片' && sidebarRef.value?.fileInput) {
+    removeFile(fileName)
+    if (selectedFileName.value === '未选择文件' && mediaAttachments.value.length === 0 && sidebarRef.value?.fileInput) {
       sidebarRef.value.fileInput.value = ''
     }
+  }
+
+  function handleRemoveMedia(mediaId: string) {
+    removeMedia(mediaId)
+  }
+
+  function getPendingMediaAttachments(): ChatMediaAttachment[] {
+    return mediaAttachments.value.map((item) => ({
+      type: item.type,
+      name: item.name,
+      filePath: item.filePath,
+      previewUrl: item.previewUrl
+    }))
   }
 
   async function startChat() {
@@ -377,18 +444,23 @@ export function useAppLogic() {
     const conversation = currentConversation.value ?? conversations.value[0]
     if (!conversation) return
 
+    const mediaList = getPendingMediaAttachments()
+    const currentMediaPath = mediaList[0]?.filePath
+
     const userMessage: ChatMessage = {
       id: createId('message'),
       role: 'user',
       content: currentQuery,
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      mediaList: mediaList.length > 0 ? mediaList : undefined
     }
 
     const assistantMessage: ChatMessage = {
       id: createId('message'),
       role: 'assistant',
       content: '',
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      mediaList: mediaList.length > 0 ? mediaList : undefined
     }
 
     updateConversation(conversation.id, (target) => {
@@ -402,8 +474,9 @@ export function useAppLogic() {
     streamingConversationId.value = conversation.id
     streamingAssistantMessageId.value = assistantMessage.id
 
-    await startChatLogic(currentQuery, ttsSessionId, resetTtsPlayer, ensureTtsConnection, videoPath.value)
     query.value = ''
+    clearVideo()
+    await startChatLogic(currentQuery, ttsSessionId, resetTtsPlayer, ensureTtsConnection, currentMediaPath)
   }
 
   function clearAllFiles() {
@@ -497,7 +570,7 @@ export function useAppLogic() {
     streamingAssistantMessageId,
     isCurrentConversationStreaming,
     knowledgeBaseStatus,
-    modelName: DEFAULT_MODEL_NAME,
+    modelName,
     isChatStarted,
     isConnecting,
     isStreaming,
@@ -510,6 +583,7 @@ export function useAppLogic() {
     handleFileChange,
     handleChatFileChange,
     handleRemoveFile,
+    handleRemoveMedia,
     createNewConversation,
     switchConversation,
     renameConversation,
@@ -519,6 +593,7 @@ export function useAppLogic() {
     clearFile: clearAllFiles,
     uploadSelectedFile,
     removeFile,
+    mediaAttachments,
     selectedVideoName,
     selectedImageName,
     videoPath,
