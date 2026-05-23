@@ -19,8 +19,8 @@
       </div>
 
       <div class="flex items-center gap-2 self-start lg:self-auto">
-        <n-button quaternary class="!rounded-xl" @click="$emit('clear-conversation')">
-          清空会话
+        <n-button quaternary class="!rounded-xl" @click="$emit('manage-mcp')">
+          管理 MCP
         </n-button>
         <n-dropdown trigger="click" :options="moreOptions" @select="handleSelect">
           <n-button quaternary circle class="!rounded-xl">
@@ -42,7 +42,7 @@ const props = defineProps<{
   knowledgeBaseStatus: string
 }>()
 
-const emit = defineEmits(['clear-conversation', 'new-conversation', 'rename-current'])
+const emit = defineEmits(['clear-conversation', 'new-conversation', 'rename-current', 'manage-mcp'])
 
 const moreOptions = [
   {
@@ -52,6 +52,10 @@ const moreOptions = [
   {
     label: '重命名当前会话',
     key: 'rename'
+  },
+  {
+    label: '清空会话',
+    key: 'clear'
   }
 ]
 
@@ -63,6 +67,11 @@ function handleSelect(key: string) {
 
   if (key === 'rename') {
     emit('rename-current', props.conversationTitle)
+    return
+  }
+
+  if (key === 'clear') {
+    emit('clear-conversation')
   }
 }
 </script>

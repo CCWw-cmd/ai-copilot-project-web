@@ -5,6 +5,7 @@ import ChatOutput from './components/ChatOutput.vue'
 import AppHeader from './components/AppHeader.vue'
 import AppSidebar from './components/AppSidebar.vue'
 import ChatInputArea from './components/ChatInputArea.vue'
+import McpManagerModal from './components/McpManagerModal.vue'
 import WelcomeView from './components/WelcomeView.vue'
 import { useAppLogic } from './lib/useAppLogic'
 import { API_BASE_URL } from './lib/http'
@@ -72,6 +73,7 @@ void sidebarRef
 void audioRef
 
 const isVideoPreviewOpen = ref(false)
+const isMcpManagerOpen = ref(false)
 const messagesEndRef = ref<HTMLElement | null>(null)
 const activeMediaPreview = ref<MediaPreviewPayload | null>(null)
 const assistantExportRefs = new Map<string, HTMLElement>()
@@ -274,6 +276,7 @@ function handleDeleteConversation(conversationId: string) {
                   @clear-conversation="clearCurrentConversation"
                   @new-conversation="createNewConversation"
                   @rename-current="handleRenameCurrentConversation"
+                  @manage-mcp="isMcpManagerOpen = true"
                 />
 
                 <div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[5px] border border-white/8 bg-white/4 backdrop-blur-2xl shadow-[0_20px_50px_rgba(5,1,13,0.14)]">
@@ -444,6 +447,8 @@ function handleDeleteConversation(conversationId: string) {
           </n-layout>
 
           <audio ref="audioRef" autoplay preload="none" class="hidden" />
+
+          <McpManagerModal v-model:show="isMcpManagerOpen" />
 
           <n-modal
             v-model:show="isVideoPreviewOpen"
