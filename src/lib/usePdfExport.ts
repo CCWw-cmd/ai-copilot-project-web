@@ -7,6 +7,29 @@ const { message } = createDiscreteApi(['message'], {
   }
 })
 
+function buildSerializableSvg(svg: SVGSVGElement, width: number, height: number) {
+  const clonedSvg = svg.cloneNode(true) as SVGSVGElement
+  clonedSvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+  clonedSvg.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink')
+  clonedSvg.setAttribute('width', `${width}`)
+  clonedSvg.setAttribute('height', `${height}`)
+
+  if (!clonedSvg.getAttribute('viewBox')) {
+    clonedSvg.setAttribute('viewBox', `0 0 ${width} ${height}`)
+  }
+
+  const styleTag = document.createElementNS('http://www.w3.org/2000/svg', 'style')
+  styleTag.textContent = `
+    .markmap { background: #ffffff; }
+    .markmap-node circle { fill: #ffffff; stroke: #1f2937; stroke-width: 1.5px; }
+    .markmap-node text { fill: #1f2937; font-size: 14px; font-weight: 500; }
+    .markmap-link { fill: none; stroke: #9ca3af; stroke-width: 1.5px; }
+  `
+  clonedSvg.insertBefore(styleTag, clonedSvg.firstChild)
+
+  return new XMLSerializer().serializeToString(clonedSvg)
+}
+
 export function usePdfExport() {
   const isExporting = ref(false)
 
@@ -47,10 +70,11 @@ export function usePdfExport() {
 
           try {
             const svgElement = svg as SVGSVGElement
-            const width = svgElement.clientWidth || 800
-            const height = svgElement.clientHeight || 600
+            const svgRect = svgElement.getBoundingClientRect()
+            const width = Math.max(Math.round(svgRect.width || svgElement.clientWidth || 800), 1)
+            const height = Math.max(Math.round(svgRect.height || svgElement.clientHeight || 600), 1)
             
-            const svgData = new XMLSerializer().serializeToString(svg)
+            const svgData = buildSerializableSvg(svgElement, width, height)
             const canvas = document.createElement('canvas')
             const ctx = canvas.getContext('2d')
             const img = new Image()
@@ -65,7 +89,9 @@ export function usePdfExport() {
               try {
                 canvas.width = width * 2
                 canvas.height = height * 2
-                ctx?.drawImage(img, 0, 0, canvas.width, canvas.height)
+                ctx?.scale(2, 2)
+                ctx?.fillRect(0, 0, width, height)
+                ctx?.drawImage(img, 0, 0, width, height)
                 const dataUrl = canvas.toDataURL('image/png')
                 URL.revokeObjectURL(url)
                 resolve(dataUrl)

@@ -22,9 +22,6 @@
         <n-button quaternary class="!rounded-xl" @click="$emit('clear-conversation')">
           清空会话
         </n-button>
-        <n-button quaternary class="!rounded-xl" :disabled="!canExport" :loading="isExporting" @click="$emit('export')">
-          导出
-        </n-button>
         <n-dropdown trigger="click" :options="moreOptions" @select="handleSelect">
           <n-button quaternary circle class="!rounded-xl">
             <template #icon>
@@ -43,11 +40,9 @@ const props = defineProps<{
   aiStatus: string
   modelName: string
   knowledgeBaseStatus: string
-  canExport: boolean
-  isExporting: boolean
 }>()
 
-const emit = defineEmits(['clear-conversation', 'export', 'new-conversation', 'rename-current'])
+const emit = defineEmits(['clear-conversation', 'new-conversation', 'rename-current'])
 
 const moreOptions = [
   {

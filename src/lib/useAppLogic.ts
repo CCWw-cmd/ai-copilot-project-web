@@ -191,9 +191,9 @@ export function useAppLogic() {
 
   const pageTitle = computed(() => currentConversationTitle.value)
 
-  const triggerPdfExport = (el?: HTMLElement | null) => {
+  const triggerPdfExport = (el?: HTMLElement | null, filename?: string) => {
     const targetEl = el || exportContentRef.value
-    exportToPdf(targetEl, pageTitle.value)
+    exportToPdf(targetEl, filename || pageTitle.value)
   }
   const { 
     isReading, 

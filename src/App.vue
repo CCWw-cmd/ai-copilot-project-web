@@ -49,7 +49,6 @@ const {
   isChatStarted,
   currentAction,
   hasReceivedChunk,
-  showPdfButton,
   isLoading,
   canSend,
   handleFileChange,
@@ -68,12 +67,14 @@ const {
   isUploadingVideo
 } = useAppLogic()
 
+void exportContentRef
 void sidebarRef
 void audioRef
 
 const isVideoPreviewOpen = ref(false)
 const messagesEndRef = ref<HTMLElement | null>(null)
 const activeMediaPreview = ref<MediaPreviewPayload | null>(null)
+const assistantExportRefs = new Map<string, HTMLElement>()
 
 const { message } = createDiscreteApi(['message'], {
   configProviderProps: {
@@ -167,6 +168,26 @@ function formatMessageTime(timestamp: number) {
   })
 }
 
+function setAssistantExportRef(messageId: string, el: Element | null) {
+  if (el instanceof HTMLElement) {
+    assistantExportRefs.set(messageId, el)
+    return
+  }
+  assistantExportRefs.delete(messageId)
+}
+
+function buildAssistantExportFilename(createdAt: number) {
+  const safeTitle = currentConversationTitle.value.replace(/[\\/:*?"<>|]/g, '-').trim() || 'AI回复'
+  const safeTime = formatMessageTime(createdAt).replace(/:/g, '-')
+  return `${safeTitle}-${safeTime}`
+}
+
+function handleExportMessage(messageId: string, createdAt: number) {
+  const target = assistantExportRefs.get(messageId)
+  if (!target) return
+  exportToPdf(target, buildAssistantExportFilename(createdAt))
+}
+
 function isAssistantMessageStreaming(messageId: string) {
   return isCurrentConversationStreaming.value && streamingAssistantMessageId.value === messageId
 }
@@ -250,10 +271,7 @@ function handleDeleteConversation(conversationId: string) {
                   :ai-status="status"
                   :model-name="modelName"
                   :knowledge-base-status="knowledgeBaseStatus"
-                  :can-export="showPdfButton"
-                  :is-exporting="isExporting"
                   @clear-conversation="clearCurrentConversation"
-                  @export="exportToPdf(exportContentRef)"
                   @new-conversation="createNewConversation"
                   @rename-current="handleRenameCurrentConversation"
                 />
@@ -293,7 +311,31 @@ function handleDeleteConversation(conversationId: string) {
                                 <span class="font-medium text-white/70">
                                   {{ messageItem.role === 'user' ? '你' : 'AI 助手' }}
                                 </span>
-                                <span class="text-white/35">{{ formatMessageTime(messageItem.createdAt) }}</span>
+                                <div
+                                  v-if="messageItem.role === 'assistant'"
+                                  class="flex items-center gap-2 text-white/35"
+                                >
+                                  <n-button
+                                    quaternary
+                                    circle
+                                    size="tiny"
+                                    class="!rounded-full !text-white/45 hover:!text-white/80"
+                                    title="下载 PDF"
+                                    :loading="isExporting"
+                                    :disabled="!messageItem.content.trim()"
+                                    @click="handleExportMessage(messageItem.id, messageItem.createdAt)"
+                                  >
+                                    <template #icon>
+                                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                        <polyline points="7 10 12 15 17 10"></polyline>
+                                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                                      </svg>
+                                    </template>
+                                  </n-button>
+                                  <span>{{ formatMessageTime(messageItem.createdAt) }}</span>
+                                </div>
+                                <span v-else class="text-white/35">{{ formatMessageTime(messageItem.createdAt) }}</span>
                               </div>
 
                               <template v-if="messageItem.role === 'user'">
@@ -341,7 +383,11 @@ function handleDeleteConversation(conversationId: string) {
                                 </div>
                               </template>
 
-                              <div v-else class="min-w-0">
+                              <div
+                                v-else
+                                :ref="(el) => setAssistantExportRef(messageItem.id, el as Element | null)"
+                                class="min-w-0"
+                              >
                                 <div v-if="messageItem.content.trim()" class="markdown-body text-base leading-7 text-white/88">
                                   <ChatOutput
                                     :output="messageItem.content"
