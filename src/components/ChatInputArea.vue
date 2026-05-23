@@ -100,12 +100,12 @@
             <n-input
               :value="query"
               type="textarea"
-              placeholder="输入你的问题，按 Ctrl + Enter 发送"
+              placeholder="输入你的问题，按 Enter 发送，Ctrl + Enter 换行"
               :autosize="{ minRows: 1, maxRows: 8 }"
               :bordered="false"
               class="!bg-transparent shadow-none"
               @update:value="$emit('update:query', $event)"
-              @keydown.ctrl.enter.prevent="$emit('send')"
+              @keydown="handleInputKeydown"
             />
           </div>
 
@@ -129,9 +129,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 
-defineProps<{
+const props = defineProps<{
   query: string
   isChatStarted: boolean
   isUploading: boolean
@@ -150,7 +150,47 @@ defineProps<{
   }>
 }>()
 
-defineEmits(['update:query', 'update:isMuted', 'send', 'clear-file', 'preview-media', 'remove-media', 'file-change'])
+const emit = defineEmits([
+  'update:query',
+  'update:isMuted',
+  'send',
+  'clear-file',
+  'preview-media',
+  'remove-media',
+  'file-change',
+])
 
 const chatFileInput = ref<HTMLInputElement | null>(null)
+
+function handleInputKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Enter') {
+    return
+  }
+
+  if (event.ctrlKey) {
+    event.preventDefault()
+
+    const target = event.target as HTMLTextAreaElement | null
+    if (!target) {
+      return
+    }
+
+    const selectionStart = target.selectionStart ?? 0
+    const selectionEnd = target.selectionEnd ?? selectionStart
+    const nextValue = `${props.query.slice(0, selectionStart)}\n${props.query.slice(selectionEnd)}`
+
+    emit('update:query', nextValue)
+
+    nextTick(() => {
+      const cursorPosition = selectionStart + 1
+      target.setSelectionRange(cursorPosition, cursorPosition)
+    })
+    return
+  }
+
+  if (!event.shiftKey && !event.altKey && !event.metaKey) {
+    event.preventDefault()
+    emit('send')
+  }
+}
 </script>
