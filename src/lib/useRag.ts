@@ -10,9 +10,16 @@ const { message: nMessage } = createDiscreteApi(['message'], {
 })
 
 export function useRag() {
+  type UploadedFileItem = {
+    name: string
+    fullName?: string
+    status: 'uploading' | 'success' | 'error'
+    createdAt?: number
+  }
+
   const selectedFile = ref<File | null>(null)
   const selectedFileName = ref('未选择文件')
-  const uploadedFiles = ref<{ name: string; fullName?: string; status: 'uploading' | 'success' | 'error'; createdAt?: number }[]>([])
+  const uploadedFiles = ref<UploadedFileItem[]>([])
   const isUploading = ref(false)
   const status = ref('状态：待机')
   const output = ref('')
@@ -20,16 +27,27 @@ export function useRag() {
   let ragProgressEs: EventSource | null = null
   let currentUploadTaskId: string | null = null
 
+  function normalizeUploadedFiles(files: UploadedFileItem[]) {
+    const uniqueFiles = new Map<string, UploadedFileItem>()
+
+    files.forEach((file) => {
+      const key = file.fullName ? `server:${file.fullName}` : `pending:${file.name}`
+      uniqueFiles.set(key, file)
+    })
+
+    return Array.from(uniqueFiles.values()).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+  }
+
   async function fetchUploadedFiles() {
     try {
       const response = await http.get('/rag/files')
       if (Array.isArray(response.data)) {
-        uploadedFiles.value = response.data.map((f: any) => ({
+        uploadedFiles.value = normalizeUploadedFiles(response.data.map((f: any) => ({
           name: f.name,
           fullName: f.fullName,
           status: 'success',
           createdAt: f.createdAt
-        }))
+        })))
       }
     } catch (err) {
       console.error('获取知识库文件列表失败:', err)
@@ -144,6 +162,10 @@ export function useRag() {
       return
     }
 
+    if (isUploading.value) {
+      return
+    }
+
     isUploading.value = true
     status.value = '状态：文件上传中...'
     currentUploadTaskId = createUploadTaskId()
@@ -153,7 +175,10 @@ export function useRag() {
     if (existingFileIndex > -1) {
       uploadedFiles.value[existingFileIndex].status = 'uploading'
     } else {
-      uploadedFiles.value.push({ name: targetFile.name, status: 'uploading' })
+      uploadedFiles.value = normalizeUploadedFiles([
+        ...uploadedFiles.value,
+        { name: targetFile.name, status: 'uploading' }
+      ])
     }
 
     const formData = new FormData()
@@ -224,17 +249,27 @@ export function useRag() {
 
   async function removeFile(identifier: string) {
     const fileObj = uploadedFiles.value.find(f => (f.fullName || f.name) === identifier)
-    if (fileObj?.fullName) {
-      try {
-        await http.delete(`/rag/files/${encodeURIComponent(fileObj.fullName)}`)
-        nMessage.success('知识库文件已删除')
-      } catch (err) {
-        console.error('删除知识库文件失败:', err)
-        nMessage.error('删除知识库文件失败')
+
+    if (!fileObj) return
+
+    if (!fileObj.fullName) {
+      uploadedFiles.value = uploadedFiles.value.filter(f => (f.fullName || f.name) !== identifier)
+      if (selectedFileName.value === identifier || selectedFileName.value === fileObj.name) {
+        clearSelectedFile()
       }
+      return
     }
-    
-    uploadedFiles.value = uploadedFiles.value.filter(f => (f.fullName || f.name) !== identifier)
+
+    try {
+      await http.delete(`/rag/files/${encodeURIComponent(fileObj.fullName)}`)
+      nMessage.success('知识库文件已删除')
+    } catch (err) {
+      console.error('删除知识库文件失败:', err)
+      nMessage.error('删除知识库文件失败')
+    } finally {
+      await fetchUploadedFiles()
+    }
+
     if (selectedFileName.value === identifier || (fileObj && selectedFileName.value === fileObj.name)) {
       clearSelectedFile()
     }

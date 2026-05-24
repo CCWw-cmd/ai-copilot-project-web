@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { darkTheme, createDiscreteApi } from 'naive-ui'
+import { darkTheme, createDiscreteApi, type ScrollbarInst } from 'naive-ui'
 import { computed, nextTick, ref, watch } from 'vue'
 import ChatOutput from './components/ChatOutput.vue'
 import AppHeader from './components/AppHeader.vue'
@@ -23,6 +23,12 @@ type MessageMediaItem = {
   type: 'image' | 'video'
   name: string
   previewUrl: string
+}
+
+type MessagesScrollbarInst = ScrollbarInst & {
+  scrollbarInstRef?: {
+    containerRef: HTMLElement | null
+  } | null
 }
 
 const {
@@ -74,9 +80,13 @@ void audioRef
 
 const isVideoPreviewOpen = ref(false)
 const isMcpManagerOpen = ref(false)
+const messagesScrollbarRef = ref<MessagesScrollbarInst | null>(null)
 const messagesEndRef = ref<HTMLElement | null>(null)
 const activeMediaPreview = ref<MediaPreviewPayload | null>(null)
 const assistantExportRefs = new Map<string, HTMLElement>()
+const shouldAutoScroll = ref(true)
+
+const AUTO_SCROLL_BOTTOM_THRESHOLD = 80
 
 const { message } = createDiscreteApi(['message'], {
   configProviderProps: {
@@ -96,7 +106,27 @@ function resolveMediaSrc(mediaPreviewUrl?: string) {
   return `${API_BASE_URL}${mediaPreviewUrl}`
 }
 
-function scrollToBottom() {
+function getMessagesScrollContainer() {
+  return messagesScrollbarRef.value?.scrollbarInstRef?.containerRef ?? null
+}
+
+function isNearBottom() {
+  const container = getMessagesScrollContainer()
+  if (!container) return true
+  const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+  return distanceToBottom <= AUTO_SCROLL_BOTTOM_THRESHOLD
+}
+
+function syncAutoScrollState() {
+  shouldAutoScroll.value = isNearBottom()
+}
+
+function handleMessagesScroll() {
+  syncAutoScrollState()
+}
+
+function scrollToBottom(force = false) {
+  if (!force && !shouldAutoScroll.value) return
   messagesEndRef.value?.scrollIntoView({ behavior: 'smooth', block: 'end' })
 }
 
@@ -113,7 +143,8 @@ watch(
   () => currentConversationId.value,
   async () => {
     await nextTick()
-    scrollToBottom()
+    shouldAutoScroll.value = true
+    scrollToBottom(true)
   },
 )
 
@@ -280,7 +311,11 @@ function handleDeleteConversation(conversationId: string) {
                 />
 
                 <div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[5px] border border-white/8 bg-white/4 backdrop-blur-2xl shadow-[0_20px_50px_rgba(5,1,13,0.14)]">
-                  <n-scrollbar class="flex-1 box-border pb-100px">
+                  <n-scrollbar
+                    ref="messagesScrollbarRef"
+                    class="flex-1 box-border pb-100px"
+                    @scroll="handleMessagesScroll"
+                  >
                     <div ref="exportContentRef" class="mx-auto flex min-h-full w-full max-w-5xl flex-col px-6 py-6">
                       <WelcomeView v-if="conversationMessages.length === 0" :lottie-url="ChatbitLottieUrl" />
 
