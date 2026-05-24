@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { darkTheme, createDiscreteApi, type ScrollbarInst } from 'naive-ui'
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import ChatOutput from './components/ChatOutput.vue'
 import AppHeader from './components/AppHeader.vue'
 import AppSidebar from './components/AppSidebar.vue'
@@ -86,8 +86,10 @@ const messagesEndRef = ref<HTMLElement | null>(null)
 const activeMediaPreview = ref<MediaPreviewPayload | null>(null)
 const assistantExportRefs = new Map<string, HTMLElement>()
 const shouldAutoScroll = ref(true)
+const copiedMessageId = ref('')
 
 const AUTO_SCROLL_BOTTOM_THRESHOLD = 80
+let copiedMessageTimer: number | null = null
 
 const { message } = createDiscreteApi(['message'], {
   configProviderProps: {
@@ -222,6 +224,53 @@ function handleExportMessage(messageId: string, createdAt: number) {
   exportToPdf(target, buildAssistantExportFilename(createdAt))
 }
 
+async function copyUserMessage(messageId: string, content: string) {
+  const text = content.trim()
+  if (!text) {
+    message.warning('当前问题内容为空')
+    return
+  }
+
+  try {
+    if (navigator.clipboard?.writeText && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      textarea.setAttribute('readonly', 'true')
+      textarea.style.position = 'fixed'
+      textarea.style.top = '0'
+      textarea.style.left = '-9999px'
+      document.body.appendChild(textarea)
+      textarea.focus()
+      textarea.select()
+
+      const copied = document.execCommand('copy')
+      document.body.removeChild(textarea)
+
+      if (!copied) {
+        throw new Error('copy_failed')
+      }
+    }
+
+    copiedMessageId.value = messageId
+    if (copiedMessageTimer !== null) {
+      window.clearTimeout(copiedMessageTimer)
+    }
+    copiedMessageTimer = window.setTimeout(() => {
+      if (copiedMessageId.value === messageId) {
+        copiedMessageId.value = ''
+      }
+      copiedMessageTimer = null
+    }, 2000)
+
+    message.success('问题已复制')
+  } catch (error) {
+    console.error('复制问题失败:', error)
+    message.error('复制失败，请稍后重试')
+  }
+}
+
 function isAssistantMessageStreaming(messageId: string) {
   return isCurrentConversationStreaming.value && streamingAssistantMessageId.value === messageId
 }
@@ -265,6 +314,12 @@ function handleDeleteConversation(conversationId: string) {
   if (!confirmed) return
   deleteConversation(conversationId)
 }
+
+onBeforeUnmount(() => {
+  if (copiedMessageTimer !== null) {
+    window.clearTimeout(copiedMessageTimer)
+  }
+})
 </script>
 
 <template>
@@ -341,7 +396,7 @@ function handleDeleteConversation(conversationId: string) {
                             </div>
 
                             <div
-                              class="min-w-0 flex-1 rounded-[28px] border px-5 py-4"
+                              class="message-bubble min-w-0 flex-1 rounded-[28px] border px-5 py-4"
                               :class="messageItem.role === 'user'
                                 ? 'border-violet-300/18 bg-gradient-to-br from-violet-500/16 to-fuchsia-500/12'
                                 : 'border-white/8 bg-black/12'"
@@ -421,24 +476,71 @@ function handleDeleteConversation(conversationId: string) {
                                   </div>
                                 </div>
 
-                                <div v-if="messageItem.canRetry" class="mt-4 flex justify-end">
-                                  <n-button
-                                    quaternary
-                                    circle
-                                    size="small"
-                                    class="!rounded-full !text-white/55 hover:!text-violet-200 hover:!bg-white/10"
-                                    title="重新提问"
-                                    @click="retryMessage(messageItem.id)"
+                                <div v-if="messageItem.content.trim() || messageItem.canRetry" class="mt-4 flex justify-end">
+                                  <div
+                                    class="user-bubble-actions flex items-center gap-2"
+                                    :class="{ 'is-visible': messageItem.canRetry || copiedMessageId === messageItem.id }"
                                   >
-                                    <template #icon>
-                                      <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <path d="M3 12a9 9 0 0 1 15.3-6.3L21 8" />
-                                        <path d="M21 3v5h-5" />
-                                        <path d="M21 12a9 9 0 0 1-15.3 6.3L3 16" />
-                                        <path d="M8 16H3v5" />
-                                      </svg>
-                                    </template>
-                                  </n-button>
+                                    <n-button
+                                      quaternary
+                                      circle
+                                      size="small"
+                                      class="!rounded-full !text-white/55 hover:!text-violet-200 hover:!bg-white/10"
+                                      :title="copiedMessageId === messageItem.id ? '已复制' : '复制问题'"
+                                      @click="copyUserMessage(messageItem.id, messageItem.content)"
+                                    >
+                                      <template #icon>
+                                        <svg
+                                          v-if="copiedMessageId === messageItem.id"
+                                          xmlns="http://www.w3.org/2000/svg"
+                                          width="15"
+                                          height="15"
+                                          viewBox="0 0 24 24"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          stroke-width="2"
+                                          stroke-linecap="round"
+                                          stroke-linejoin="round"
+                                        >
+                                          <path d="M20 6 9 17l-5-5" />
+                                        </svg>
+                                        <svg
+                                          v-else
+                                          xmlns="http://www.w3.org/2000/svg"
+                                          width="15"
+                                          height="15"
+                                          viewBox="0 0 24 24"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          stroke-width="2"
+                                          stroke-linecap="round"
+                                          stroke-linejoin="round"
+                                        >
+                                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                                        </svg>
+                                      </template>
+                                    </n-button>
+
+                                    <n-button
+                                      v-if="messageItem.canRetry"
+                                      quaternary
+                                      circle
+                                      size="small"
+                                      class="!rounded-full !text-white/55 hover:!text-violet-200 hover:!bg-white/10"
+                                      title="重新提问"
+                                      @click="retryMessage(messageItem.id)"
+                                    >
+                                      <template #icon>
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                          <path d="M3 12a9 9 0 0 1 15.3-6.3L21 8" />
+                                          <path d="M21 3v5h-5" />
+                                          <path d="M21 12a9 9 0 0 1-15.3 6.3L3 16" />
+                                          <path d="M8 16H3v5" />
+                                        </svg>
+                                      </template>
+                                    </n-button>
+                                  </div>
                                 </div>
                               </template>
 
@@ -558,5 +660,18 @@ function handleDeleteConversation(conversationId: string) {
 
 :deep(.n-layout) {
   background: transparent;
+}
+
+.user-bubble-actions {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+.message-bubble:hover .user-bubble-actions,
+.message-bubble:focus-within .user-bubble-actions,
+.user-bubble-actions.is-visible {
+  opacity: 1;
+  pointer-events: auto;
 }
 </style>
