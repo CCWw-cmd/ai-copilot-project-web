@@ -22,6 +22,7 @@ interface ChatMessage {
   content: string
   createdAt: number
   mediaList?: ChatMediaAttachment[]
+  canRetry?: boolean
 }
 
 interface Conversation {
@@ -75,6 +76,27 @@ function normalizeMediaAttachments(raw: unknown): ChatMediaAttachment[] | undefi
   return items.length > 0 ? items : undefined
 }
 
+function repairInterruptedMessages(messages: ChatMessage[]) {
+  const repaired: ChatMessage[] = []
+
+  for (const message of messages) {
+    const previousMessage = repaired[repaired.length - 1]
+    const isEmptyAssistant =
+      message.role === 'assistant'
+      && message.content.trim().length === 0
+      && previousMessage?.role === 'user'
+
+    if (isEmptyAssistant) {
+      previousMessage.canRetry = true
+      continue
+    }
+
+    repaired.push(message)
+  }
+
+  return repaired
+}
+
 function normalizeConversation(raw: unknown): Conversation | null {
   if (!raw || typeof raw !== 'object') return null
 
@@ -91,6 +113,7 @@ function normalizeConversation(raw: unknown): Conversation | null {
           role: msg.role === 'user' ? 'user' : 'assistant',
           content: typeof msg.content === 'string' ? msg.content : '',
           createdAt: typeof msg.createdAt === 'number' ? msg.createdAt : Date.now(),
+          canRetry: typeof (msg as any).canRetry === 'boolean' ? (msg as any).canRetry : undefined,
           mediaList: normalizeMediaAttachments((msg as any).mediaList)
             ?? (normalizeMediaAttachment((msg as any).media) ? [normalizeMediaAttachment((msg as any).media)!] : undefined)
         } satisfies ChatMessage
@@ -103,7 +126,7 @@ function normalizeConversation(raw: unknown): Conversation | null {
       ? candidate.title.trim()
       : UNTITLED_CONVERSATION,
     updatedAt: typeof candidate.updatedAt === 'number' ? candidate.updatedAt : Date.now(),
-    messages
+    messages: repairInterruptedMessages(messages)
   }
 }
 
@@ -152,6 +175,7 @@ export function useAppLogic() {
   const conversations = ref<Conversation[]>(loadStoredConversations())
   const currentConversationId = ref(conversations.value[0]?.id ?? createConversation().id)
   const streamingConversationId = ref('')
+  const streamingUserMessageId = ref('')
   const streamingAssistantMessageId = ref('')
   const modelName = ref(DEFAULT_MODEL_NAME)
 
@@ -227,6 +251,7 @@ export function useAppLogic() {
     hasReceivedChunk, 
     output: chatOutput, 
     status: chatStatus, 
+    lastStreamOutcome,
     startChat: startChatLogic, 
     closeEventSource,
     resetChatState
@@ -311,6 +336,7 @@ export function useAppLogic() {
 
   function stopStreamingConversation() {
     streamingConversationId.value = ''
+    streamingUserMessageId.value = ''
     streamingAssistantMessageId.value = ''
     closeEventSource()
     resetChatState()
@@ -437,6 +463,16 @@ export function useAppLogic() {
     }))
   }
 
+  function createAssistantMessage(mediaList?: ChatMediaAttachment[]): ChatMessage {
+    return {
+      id: createId('message'),
+      role: 'assistant',
+      content: '',
+      createdAt: Date.now(),
+      mediaList: mediaList?.length ? [...mediaList] : undefined
+    }
+  }
+
   async function startChat() {
     const currentQuery = query.value.trim()
     if (!currentQuery) return
@@ -452,16 +488,11 @@ export function useAppLogic() {
       role: 'user',
       content: currentQuery,
       createdAt: Date.now(),
+      canRetry: false,
       mediaList: mediaList.length > 0 ? mediaList : undefined
     }
 
-    const assistantMessage: ChatMessage = {
-      id: createId('message'),
-      role: 'assistant',
-      content: '',
-      createdAt: Date.now(),
-      mediaList: mediaList.length > 0 ? mediaList : undefined
-    }
+    const assistantMessage = createAssistantMessage(mediaList)
 
     updateConversation(conversation.id, (target) => {
       if (target.messages.length === 0 || target.title === UNTITLED_CONVERSATION) {
@@ -472,11 +503,52 @@ export function useAppLogic() {
     })
 
     streamingConversationId.value = conversation.id
+    streamingUserMessageId.value = userMessage.id
     streamingAssistantMessageId.value = assistantMessage.id
 
     query.value = ''
     clearVideo()
     await startChatLogic(currentQuery, ttsSessionId, resetTtsPlayer, ensureTtsConnection, currentMediaPath)
+  }
+
+  async function retryMessage(messageId: string) {
+    if (isStreaming.value) return
+
+    const conversation = currentConversation.value ?? conversations.value[0]
+    if (!conversation) return
+
+    const userMessage = conversation.messages.find(
+      (message) => message.id === messageId && message.role === 'user',
+    )
+    if (!userMessage) return
+
+    const mediaList = userMessage.mediaList ? [...userMessage.mediaList] : []
+    const assistantMessage = createAssistantMessage(mediaList)
+
+    updateConversation(conversation.id, (target) => {
+      const userIndex = target.messages.findIndex(
+        (message) => message.id === messageId && message.role === 'user',
+      )
+      if (userIndex < 0) return
+
+      target.messages[userIndex].canRetry = false
+      target.messages.splice(userIndex + 1, 0, assistantMessage)
+      target.updatedAt = Date.now()
+    })
+
+    streamingConversationId.value = conversation.id
+    streamingUserMessageId.value = userMessage.id
+    streamingAssistantMessageId.value = assistantMessage.id
+
+    query.value = ''
+    clearVideo()
+    await startChatLogic(
+      userMessage.content,
+      ttsSessionId,
+      resetTtsPlayer,
+      ensureTtsConnection,
+      mediaList[0]?.filePath,
+    )
   }
 
   function clearAllFiles() {
@@ -522,7 +594,32 @@ export function useAppLogic() {
 
   watch(isStreaming, (streaming) => {
     if (streaming) return
+
+    const conversationId = streamingConversationId.value
+    const userMessageId = streamingUserMessageId.value
+    const assistantMessageId = streamingAssistantMessageId.value
+    const outcome = lastStreamOutcome.value
+
+    if (conversationId && userMessageId && assistantMessageId) {
+      updateConversation(conversationId, (conversation) => {
+        const userMessage = conversation.messages.find((message) => message.id === userMessageId)
+        if (!userMessage || userMessage.role !== 'user') return
+
+        if (outcome === 'interrupted') {
+          conversation.messages = conversation.messages.filter(
+            (message) => message.id !== assistantMessageId,
+          )
+          userMessage.canRetry = true
+        } else if (outcome === 'completed') {
+          userMessage.canRetry = false
+        }
+
+        conversation.updatedAt = Date.now()
+      })
+    }
+
     streamingConversationId.value = ''
+    streamingUserMessageId.value = ''
     streamingAssistantMessageId.value = ''
   })
 
@@ -590,6 +687,7 @@ export function useAppLogic() {
     deleteConversation,
     clearCurrentConversation,
     startChat,
+    retryMessage,
     clearFile: clearAllFiles,
     uploadSelectedFile,
     removeFile,

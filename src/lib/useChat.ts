@@ -17,6 +17,7 @@ export function useChat() {
   const output = ref('')
   const status = ref('状态：待机')
   const currentAction = ref('')
+  const lastStreamOutcome = ref<'idle' | 'completed' | 'interrupted'>('idle')
 
   let es: EventSource | null = null
 
@@ -60,6 +61,7 @@ export function useChat() {
     output.value = ''
     status.value = '状态：连接中...'
     currentAction.value = '准备连接...'
+    lastStreamOutcome.value = 'idle'
     isConnecting.value = true
     isStreaming.value = true
     hasReceivedChunk.value = false
@@ -88,6 +90,13 @@ export function useChat() {
     es.onmessage = (event) => {
       const data = event.data
       
+      if (data === '[DONE]') {
+        lastStreamOutcome.value = 'completed'
+        status.value = '状态：响应结束'
+        closeEventSource()
+        return
+      }
+
       // 处理状态更新消息
       if (data.startsWith('[STATUS]:')) {
         currentAction.value = data.replace('[STATUS]:', '')
@@ -104,6 +113,8 @@ export function useChat() {
 
     // 处理特殊的错误事件（如模型用量耗尽）
     es.addEventListener('error', (event: any) => {
+      if (es === null) return
+
       let errorMsg = '连接结束或发生错误'
       const data = event.data
 
@@ -116,7 +127,8 @@ export function useChat() {
         }
       }
 
-      status.value = hasReceivedChunk.value ? '状态：响应结束' : `状态：${errorMsg}`
+      lastStreamOutcome.value = 'interrupted'
+      status.value = hasReceivedChunk.value ? '状态：回复已中断' : `状态：${errorMsg}`
       
       // 如果还没收到过内容就报错了，直接显示在输出框
       if (!hasReceivedChunk.value && data) {
@@ -130,8 +142,9 @@ export function useChat() {
       // 如果已经通过 addEventListener('error') 处理过了，这里就不重复处理
       if (es === null) return 
 
+      lastStreamOutcome.value = 'interrupted'
       status.value = hasReceivedChunk.value
-        ? '状态：响应结束'
+        ? '状态：回复已中断'
         : '状态：连接丢失，请检查网络'
       closeEventSource()
     }
@@ -149,6 +162,7 @@ export function useChat() {
     output,
     status,
     currentAction,
+    lastStreamOutcome,
     startChat,
     closeEventSource,
     resetChatState
